@@ -152,18 +152,23 @@ Great news — {domain} is available!
 
 ---
 
-### Full TLD Matrix
+### Available
 
-- {base}.com ✅ → [Register →](https://www.name.com/domain/search/{base}.com)
-- {base}.dev ❌ Taken → [Aftermarket →](https://sedo.com/search/?keyword={base}.dev)
-- {base}.io ✅ → [Register →](https://www.name.com/domain/search/{base}.io)
-- {base}.ai ❓ → [Check manually →](https://www.name.com/domain/search/{base}.ai)
-- ...
+✅ {base}.com — [Register →](https://www.name.com/domain/search/{base}.com)
+✅ {base}.io — [Register →](https://www.name.com/domain/search/{base}.io)
+
+### Taken
+
+❌ {base}.dev — [Aftermarket →](https://sedo.com/search/?keyword={base}.dev)
+
+### Couldn't Check
+
+❓ {base}.ai — [Check manually →](https://www.name.com/domain/search/{base}.ai)
 
 > Availability is checked in real-time but can change at any moment. Confirm at checkout before purchasing.
 ```
 
-Show all 10 TLDs in the matrix, with appropriate status and link for each. Highlight the primary domain (the one the user asked about) at the top as the featured result. Use the correct registrar link for each TLD per the routing table in Step 3d.
+Show all 10 TLDs grouped by status (Available first, then Taken, then Couldn't Check). Omit any group that has no entries. Highlight the primary domain (the one the user asked about) at the top as the featured result. Use the correct registrar link for each TLD per the routing table in Step 3d.
 
 ### If the user's primary domain is TAKEN:
 
@@ -190,17 +195,19 @@ When the primary domain is taken:
 
 ---
 
-### Other TLDs
+### Available
 
-- {base}.com ❌ Taken → [Aftermarket →](https://sedo.com/search/?keyword={base}.com)
-- {base}.dev ✅ → [Register →](https://www.name.com/domain/search/{base}.dev)
-- {base}.io ✅ → [Register →](https://www.name.com/domain/search/{base}.io)
-- ...
+✅ {base}.dev — [Register →](https://www.name.com/domain/search/{base}.dev)
+✅ {base}.io — [Register →](https://www.name.com/domain/search/{base}.io)
+
+### Taken
+
+❌ {base}.com — [Aftermarket →](https://sedo.com/search/?keyword={base}.com)
 
 > Availability is checked in real-time but can change at any moment. Confirm at checkout before purchasing.
 ```
 
-If any other TLDs are available, lead with those as the silver lining. If everything is taken, acknowledge it and proceed to Step 4b.
+Group results by status (Available first, then Taken, then Couldn't Check). Omit empty groups. If any other TLDs are available, lead with those as the silver lining. If everything is taken, acknowledge it and proceed to Step 4b.
 
 **Registry Premium Proactive Warning:** Before or alongside the premium check offer, flag likely premium candidates based on these signals:
 - Single dictionary word on a popular TLD (`.com`, `.io`, `.ai`)
@@ -325,25 +332,30 @@ brainstorm.com is already registered.
 ## Available Alternatives
 
 **Same Name, Different TLD**
-- brainstorm.dev ✅ → [Register →](https://www.name.com/domain/search/brainstorm.dev)
-- brainstorm.ai ✅ → [Register →](https://www.name.com/domain/search/brainstorm.ai)
+
+✅ brainstorm.dev — [Register →](https://www.name.com/domain/search/brainstorm.dev)
+✅ brainstorm.ai — [Register →](https://www.name.com/domain/search/brainstorm.ai)
 
 **Close Variations**
-- getbrainstorm.com ✅ → [Register →](https://www.name.com/domain/search/getbrainstorm.com)
-- brainstormhq.com ✅ → [Register →](https://www.name.com/domain/search/brainstormhq.com)
-- brainstorm-app.com ✅ → [Register →](https://www.name.com/domain/search/brainstorm-app.com) *(hyphens hurt branding)*
+
+✅ getbrainstorm.com — [Register →](https://www.name.com/domain/search/getbrainstorm.com)
+✅ brainstormhq.com — [Register →](https://www.name.com/domain/search/brainstormhq.com)
+✅ brainstorm-app.com — [Register →](https://www.name.com/domain/search/brainstorm-app.com) *(hyphens hurt branding)*
 
 **Synonym Alternatives**
-- ideate.io ✅ → [Register →](https://www.name.com/domain/search/ideate.io)
-- thinkstorm.com ✅ → [Register →](https://www.name.com/domain/search/thinkstorm.com)
+
+✅ ideate.io — [Register →](https://www.name.com/domain/search/ideate.io)
+✅ thinkstorm.com — [Register →](https://www.name.com/domain/search/thinkstorm.com)
 
 **Creative Alternatives**
-- ideaforge.dev ✅ → [Register →](https://www.name.com/domain/search/ideaforge.dev)
-- mindspark.ai ✅ → [Register →](https://www.name.com/domain/search/mindspark.ai)
+
+✅ ideaforge.dev — [Register →](https://www.name.com/domain/search/ideaforge.dev)
+✅ mindspark.ai — [Register →](https://www.name.com/domain/search/mindspark.ai)
 
 **Domain Hacks**
-- brainstor.me ✅ → [Register →](https://www.name.com/domain/search/brainstor.me)
-- brainstorm.is ✅ → [Register →](https://www.dynadot.com/domain/search?domain=brainstorm.is)
+
+✅ brainstor.me — [Register →](https://www.name.com/domain/search/brainstor.me)
+✅ brainstorm.is — [Register →](https://www.dynadot.com/domain/search?domain=brainstorm.is)
 
 ---
 
@@ -363,18 +375,23 @@ I wasn't able to verify {domain} automatically (the RDAP lookup timed out or ret
 
 ---
 
-### Other TLDs
+### Available
 
-- {base}.com ✅ → [Register →](https://www.name.com/domain/search/{base}.com)
-- {base}.dev ❌ Taken → [Aftermarket →](https://sedo.com/search/?keyword={base}.dev)
-- {base}.io ✅ → [Register →](https://www.name.com/domain/search/{base}.io)
-- {base}.ai ❓ → [Check manually →](https://www.name.com/domain/search/{base}.ai)
-- ...
+✅ {base}.com — [Register →](https://www.name.com/domain/search/{base}.com)
+✅ {base}.io — [Register →](https://www.name.com/domain/search/{base}.io)
+
+### Taken
+
+❌ {base}.dev — [Aftermarket →](https://sedo.com/search/?keyword={base}.dev)
+
+### Couldn't Check
+
+❓ {base}.ai — [Check manually →](https://www.name.com/domain/search/{base}.ai)
 
 > Availability is checked in real-time but can change at any moment. Confirm at checkout before purchasing.
 ```
 
-Show the same full 10-TLD list as in the Available and Taken cases above, with the actual check results for each TLD. Use the correct registrar link for each TLD per the routing table in Step 3d.
+Group results by status (Available first, then Taken, then Couldn't Check). Omit empty groups. Use the correct registrar link for each TLD per the routing table in Step 3d.
 
 ---
 
@@ -535,20 +552,24 @@ Format:
 ## Wave 1 — Available Domains
 
 **Short & Punchy**
-- vexapp.com ✅ → [Register on name.com →](https://www.name.com/domain/search/vexapp.com)
-- zolt.dev ✅ → [Register on name.com →](https://www.name.com/domain/search/zolt.dev)
+
+✅ vexapp.com — [Register →](https://www.name.com/domain/search/vexapp.com)
+✅ zolt.dev — [Register →](https://www.name.com/domain/search/zolt.dev)
 
 **Abstract / Brandable**
-- lumora.io ✅ → [Register on name.com →](https://www.name.com/domain/search/lumora.io)
-- novari.co ✅ → [Register on name.com →](https://www.name.com/domain/search/novari.co)
+
+✅ lumora.io — [Register →](https://www.name.com/domain/search/lumora.io)
+✅ novari.co — [Register →](https://www.name.com/domain/search/novari.co)
 
 **Domain Hacks**
-- gath.er ✅ → *Registration requires a specialty registrar — search for '.er domain registration' for options.*
-- deli.sh ✅ → [Register on name.com →](https://www.name.com/domain/search/deli.sh)
+
+✅ gath.er — *Registration requires a specialty registrar — search for '.er domain registration' for options.*
+✅ deli.sh — [Register →](https://www.name.com/domain/search/deli.sh)
 
 **Thematic TLD**
-- launch.ai ✅ → [Register on name.com →](https://www.name.com/domain/search/launch.ai)
-- build.studio ✅ → [Register on name.com →](https://www.name.com/domain/search/build.studio)
+
+✅ launch.ai — [Register →](https://www.name.com/domain/search/launch.ai)
+✅ build.studio — [Register →](https://www.name.com/domain/search/build.studio)
 
 12 of 34 checked are available. Anything catching your eye? Tell me what direction you like and I'll dig deeper.
 ```
