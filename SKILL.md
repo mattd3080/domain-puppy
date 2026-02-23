@@ -3,7 +3,7 @@ name: domain-shark
 description: This skill should be used when the user asks to "check if a domain is available", "find a domain name", "brainstorm domain names", "is X.com taken", "search for domains", or is trying to name a product, app, or startup and needs domain options. Also activate when the user mentions needing a domain or asks about aftermarket domains listed for sale.
 version: 1.0.0
 allowed-tools: Bash
-metadata: {"openclaw": {"requires": {"bins": ["curl", "whois", "dig"]}, "homepage": "https://github.com/mattd3080/domain-shark"}}
+metadata: {"openclaw": {"requires": {"bins": ["curl"]}, "homepage": "https://github.com/mattd3080/domain-shark"}}
 ---
 
 # Domain Shark
@@ -258,7 +258,7 @@ Check `.com` + 1–2 relevant TLDs for each.
 
 ### Strategy 5: Domain Hacks
 
-Generate domain hacks where the TLD completes the name or phrase. Use real ccTLDs (see the Domain Hack Catalog in the Lookup Reference section). Check each using the full fallback chain (RDAP → WHOIS → DNS) since many ccTLDs don't support RDAP.
+Generate domain hacks where the TLD completes the name or phrase. Use real ccTLDs (see the Domain Hack Catalog in the Lookup Reference section). Check each using the full fallback chain (RDAP → DoH) since many ccTLDs don't support RDAP.
 
 Examples for "brainstorm":
 - `brainstor.me` (`.me`)
@@ -292,14 +292,13 @@ curl -s -o /dev/null -w "%{http_code}" --max-time 5 https://rdap.org/domain/neur
 
 wait
 
-# --- Strategy 5: Domain hacks (sequential WHOIS — max 5 concurrent) ---
+# --- Strategy 5: Domain hacks (RDAP — same as other strategies) ---
 # Run these after the RDAP batch above
-whois brainstor.me  > "$TMPDIR/brainstor.me.whois"   &
-whois brainstorm.is > "$TMPDIR/brainstorm.is.whois"  &
+curl -s -o /dev/null -w "%{http_code}" --max-time 5 https://rdap.org/domain/brainstor.me  > "$TMPDIR/brainstor.me"  &
+curl -s -o /dev/null -w "%{http_code}" --max-time 5 https://rdap.org/domain/brainstorm.is > "$TMPDIR/brainstorm.is" &
 wait
 
-# Read RDAP results (404 = available, 200 = taken, else = couldn't check)
-# Read WHOIS results and scan for "not found" patterns
+# Read all results (404 = available, 200 = taken, else = ❓ — apply DoH fallback per lookup-reference.md)
 # Cleanup
 rm -rf "$TMPDIR"
 ```
@@ -422,7 +421,7 @@ Keep it to one short line. Don't over-explain.
 
 When the user says they want to brainstorm (or indicates they don't have a name in mind), enter Brainstorm Mode. This is a multi-wave exploration process. Keep the energy creative and fun — you're a naming partner, not a search engine.
 
-**Premium search is NEVER triggered during brainstorm mode.** Only RDAP/WHOIS/DNS checks are used. When dozens of names are checked in bulk, offering a premium search on each taken domain would burn through checks instantly. Premium search is reserved exclusively for specific taken domains the user explicitly asked about (Flow 1 / Step 4).
+**Premium search is NEVER triggered during brainstorm mode.** Only RDAP/DoH checks are used. When dozens of names are checked in bulk, offering a premium search on each taken domain would burn through checks instantly. Premium search is reserved exclusively for specific taken domains the user explicitly asked about (Flow 1 / Step 4).
 
 ---
 
@@ -493,9 +492,8 @@ Check ALL generated names in parallel using RDAP. This means **50–100+ checks 
 
 For each name:
 - Standard dictionary names: check `.com` + 2–3 relevant alternatives (e.g., `.dev`, `.io`, `.ai`, `.app`, `.co`)
-- Domain hacks: check only the specific TLD that completes the hack (e.g., `gath.er` checks `.er`) — use the full fallback chain (RDAP → WHOIS → DNS) since many ccTLDs don't support RDAP. See the Lookup Reference section for the WHOIS and DNS fallback details.
+- Domain hacks: check only the specific TLD that completes the hack (e.g., `gath.er` checks `.er`) — use the full fallback chain (RDAP → DoH) since many ccTLDs don't support RDAP. See the Lookup Reference section for fallback details.
 - Thematic TLD plays: check the exact TLD in the name — use the fallback chain for any ccTLD
-- ccTLD checks run via WHOIS at max 5–10 concurrent (not 20–30 like RDAP) — WHOIS servers rate-limit aggressively
 
 **Batch template (adapt for actual names):**
 
@@ -794,5 +792,5 @@ Use `python3 -c` for JSON parsing — do not assume `jq` is installed.
 
 Detailed lookup tables are in `references/` — consult them as needed:
 
-- **`references/lookup-reference.md`** — RDAP command and status codes, WHOIS not-found patterns, WHOIS sub-batch template, DNS fallback, full fallback chain diagram, graceful degradation threshold and response format
+- **`references/lookup-reference.md`** — RDAP command and status codes, DoH fallback via curl, full fallback chain diagram, graceful degradation threshold and response format
 - **`references/tld-catalog.md`** — Thematic TLD pairings by project type (12 categories), domain hack catalog with 22 ccTLDs and curated examples
