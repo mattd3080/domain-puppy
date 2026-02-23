@@ -3,7 +3,7 @@ name: domain-shark
 description: This skill should be used when the user asks to "check if a domain is available", "find a domain name", "brainstorm domain names", "is X.com taken", "search for domains", or is trying to name a product, app, or startup and needs domain options. Also activate when the user mentions needing a domain or asks about aftermarket domains listed for sale.
 version: 1.4.0
 allowed-tools: Bash
-metadata: {"openclaw": {"requires": {"bins": ["curl"]}, "homepage": "https://github.com/mattd3080/domain-shark"}}
+metadata: {"openclaw": {"requires": {"bins": ["curl", "python3"]}, "homepage": "https://github.com/mattd3080/domain-shark"}}
 ---
 
 # Domain Shark
@@ -96,7 +96,7 @@ TMPFILE=$(mktemp)
 
 # --- Domain availability routing (v1.4.0) ---
 rdap_url() {
-  local domain="$1"
+  local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   local tld="${domain##*.}"
   case "$tld" in
     com) echo "https://rdap.verisign.com/com/v1/domain/${domain}" ;;
@@ -399,7 +399,7 @@ TMPDIR=$(mktemp -d)
 
 # --- Domain availability routing (v1.4.0) ---
 rdap_url() {
-  local domain="$1"
+  local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   local tld="${domain##*.}"
   case "$tld" in
     com) echo "https://rdap.verisign.com/com/v1/domain/${domain}" ;;
@@ -695,7 +695,7 @@ TMPDIR=$(mktemp -d)
 
 # --- Domain availability routing (v1.4.0) ---
 rdap_url() {
-  local domain="$1"
+  local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   local tld="${domain##*.}"
   case "$tld" in
     com) echo "https://rdap.verisign.com/com/v1/domain/${domain}" ;;

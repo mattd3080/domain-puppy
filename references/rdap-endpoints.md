@@ -145,7 +145,7 @@ Copy this function **verbatim** into all 4 SKILL.md templates. Do not modify the
 
 ```bash
 rdap_url() {
-  local domain="$1"
+  local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   local tld="${domain##*.}"
   case "$tld" in
     # --- Verisign ---
