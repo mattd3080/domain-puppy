@@ -19,7 +19,7 @@ Status codes:
 - `200` → Taken (definitive)
 - `000` or anything else → Non-definitive — proceed to DoH fallback
 
-**Concurrency limit:** 20–30 parallel checks per batch.
+**Concurrency limit:** 15 parallel checks per batch (rdap.org rate-limits above ~15 concurrent requests from a single IP).
 
 ---
 

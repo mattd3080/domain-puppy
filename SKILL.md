@@ -247,7 +247,7 @@ Generate and check close variations of the base name:
 - Hyphenated: `{base-hyphenated}.com` — always flag hyphens: "(Note: hyphens generally hurt branding and memorability)"
 - Abbreviation: truncate to a recognizable short form
 
-Check each variation against `.com` and `.io` at minimum. Run up to 30 concurrent RDAP checks.
+Check each variation against `.com` and `.io` at minimum. Run up to 15 concurrent RDAP checks per batch (rdap.org rate-limits above ~15 concurrent requests).
 
 ### Strategy 3: Synonym & Thesaurus Exploration
 
@@ -506,7 +506,7 @@ Check ALL generated names in parallel using RDAP. This means **50–100+ checks 
 
 **IMPORTANT — bash timeout:** Bulk checks can run 50–100+ curl requests across multiple batches. Always set the bash timeout to at least 3 minutes (180000ms). Use `--max-time 5` (not 10) per curl to keep batches fast.
 
-**Batching strategy:** Run checks in groups of 20–30 concurrent processes. Wait for each batch to finish before starting the next.
+**Batching strategy:** Run checks in groups of **15** concurrent processes max (rdap.org rate-limits above ~15). Wait for each batch to finish before starting the next.
 
 For each name:
 - Standard dictionary names: check `.com` + 2–3 relevant alternatives (e.g., `.dev`, `.io`, `.ai`, `.app`, `.co`)
