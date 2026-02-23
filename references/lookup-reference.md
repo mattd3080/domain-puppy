@@ -26,6 +26,16 @@ Status codes:
 
 Use when RDAP returns a non-definitive result or the TLD is a ccTLD known to not support RDAP.
 
+**Check availability first:**
+```bash
+if ! command -v whois &>/dev/null; then
+  # whois not installed — skip to DNS fallback
+  # If DNS also unavailable, classify as ❓ and provide manual check link
+fi
+```
+
+If `whois` is not available, tell the user once: *"whois isn't installed on your system — I can't check ccTLD availability for this domain. [Check manually →](https://www.name.com/domain/search/{domain})"*. Do not repeat this warning for every domain in the same session.
+
 ```bash
 whois {domain}
 ```
@@ -73,6 +83,13 @@ grep -iqE "No match for|NOT FOUND|No entries found|Domain not found|No Data Foun
 
 Use when both RDAP and WHOIS fail or are inconclusive.
 
+**Check availability first:**
+```bash
+if ! command -v dig &>/dev/null; then
+  # dig not installed — classify as ❓, provide manual check link, move on
+fi
+```
+
 ```bash
 dig +short {domain}
 ```
@@ -98,10 +115,12 @@ fi
 ```
 1. RDAP  →  404 (available) or 200 (taken)? → DONE
               ↓ non-definitive
-2. WHOIS →  "not found" pattern? → available
+2. WHOIS →  not installed? → skip to DNS
+            "not found" pattern? → available
               registration data? → taken
               ↓ unclear
-3. DNS   →  any result → ❓ always
+3. DNS   →  not installed? → ❓ + manual link
+            any result → ❓ always
 ```
 
 ---
