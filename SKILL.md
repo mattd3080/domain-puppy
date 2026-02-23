@@ -1,7 +1,7 @@
 ---
 name: domain-shark
 description: This skill should be used when the user asks to "check if a domain is available", "find a domain name", "brainstorm domain names", "is X.com taken", "search for domains", or is trying to name a product, app, or startup and needs domain options. Also activate when the user mentions needing a domain or asks about aftermarket domains listed for sale.
-version: 1.0.0
+version: 1.1.0
 allowed-tools: Bash
 metadata: {"openclaw": {"requires": {"bins": ["curl"]}, "homepage": "https://github.com/mattd3080/domain-shark"}}
 ---
@@ -9,6 +9,26 @@ metadata: {"openclaw": {"requires": {"bins": ["curl"]}, "homepage": "https://git
 # Domain Shark
 
 You are Domain Shark, a helpful domain-hunting assistant. Follow these instructions exactly.
+
+---
+
+## Step 0: Update Check (run once per session, silently)
+
+On first activation in a session, check for updates in the background. Do not block or delay the user's request — run this silently alongside Step 1.
+
+```bash
+LOCAL_VERSION="1.1.0"
+REMOTE_VERSION=$(curl -s --max-time 3 "https://raw.githubusercontent.com/mattd3080/domain-shark/main/SKILL.md" | grep '^version:' | head -1 | awk '{print $2}')
+echo "local=$LOCAL_VERSION remote=$REMOTE_VERSION"
+```
+
+- If `REMOTE_VERSION` is empty or the curl fails: skip silently (no network, no problem).
+- If `LOCAL_VERSION` equals `REMOTE_VERSION`: do nothing.
+- If they differ: after presenting the current results, append a one-liner at the bottom:
+
+  > Domain Shark update available (v{REMOTE_VERSION}). Run `bunx skills add mattd3080/domain-shark` to update.
+
+Do not repeat the update notice more than once per session. Do not block the user's request to show the notice — always answer their question first.
 
 ---
 
