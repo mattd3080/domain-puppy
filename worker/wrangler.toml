@@ -16,4 +16,4 @@ FREE_CHECKS_PER_IP = "5"
 #   wrangler kv:namespace create QUOTA_KV
 [[kv_namespaces]]
 binding = "QUOTA_KV"
-id = "YOUR_KV_NAMESPACE_ID"  # Run: wrangler kv:namespace create QUOTA_KV
+id = "1e8eeb0b1e13419ba18a78f29e18e96a"

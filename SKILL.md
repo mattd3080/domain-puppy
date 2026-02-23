@@ -1,7 +1,7 @@
 ---
 name: domain-shark
 description: This skill should be used when the user asks to "check if a domain is available", "find a domain name", "brainstorm domain names", "is X.com taken", "search for domains", or is trying to name a product, app, or startup and needs domain options. Also activate when the user mentions needing a domain or asks about aftermarket domains listed for sale.
-version: 1.3.0
+version: 1.4.0
 allowed-tools: Bash
 metadata: {"openclaw": {"requires": {"bins": ["curl"]}, "homepage": "https://github.com/mattd3080/domain-shark"}}
 ---
@@ -17,7 +17,7 @@ You are Domain Shark, a helpful domain-hunting assistant. Follow these instructi
 On first activation in a session, check for updates and auto-install if needed. Do not block or delay the user's request — run this in the background alongside Step 1.
 
 ```bash
-LOCAL_VERSION="1.1.0"
+LOCAL_VERSION="1.4.0"
 REMOTE_VERSION=$(curl -s --max-time 3 "https://raw.githubusercontent.com/mattd3080/domain-shark/main/SKILL.md" | grep '^version:' | head -1 | awk '{print $2}')
 if [ -n "$REMOTE_VERSION" ] && [ "$LOCAL_VERSION" != "$REMOTE_VERSION" ]; then
   echo "update_needed=true local=$LOCAL_VERSION remote=$REMOTE_VERSION"
@@ -94,16 +94,68 @@ Run all checks in parallel using bash background processes. The following is a t
 ```bash
 TMPFILE=$(mktemp)
 
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 10 https://rdap.org/domain/brainstorm.com  > "${TMPFILE}.brainstorm.com"  &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 10 https://rdap.org/domain/brainstorm.dev  > "${TMPFILE}.brainstorm.dev"  &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 10 https://rdap.org/domain/brainstorm.io   > "${TMPFILE}.brainstorm.io"   &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 10 https://rdap.org/domain/brainstorm.ai   > "${TMPFILE}.brainstorm.ai"   &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 10 https://rdap.org/domain/brainstorm.co   > "${TMPFILE}.brainstorm.co"   &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 10 https://rdap.org/domain/brainstorm.app  > "${TMPFILE}.brainstorm.app"  &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 10 https://rdap.org/domain/brainstorm.xyz  > "${TMPFILE}.brainstorm.xyz"  &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 10 https://rdap.org/domain/brainstorm.me   > "${TMPFILE}.brainstorm.me"   &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 10 https://rdap.org/domain/brainstorm.sh   > "${TMPFILE}.brainstorm.sh"   &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 10 https://rdap.org/domain/brainstorm.cc   > "${TMPFILE}.brainstorm.cc"   &
+# --- Domain availability routing (v1.4.0) ---
+rdap_url() {
+  local domain="$1"
+  local tld="${domain##*.}"
+  case "$tld" in
+    com) echo "https://rdap.verisign.com/com/v1/domain/${domain}" ;;
+    net) echo "https://rdap.verisign.com/net/v1/domain/${domain}" ;;
+    cc) echo "https://tld-rdap.verisign.com/cc/v1/domain/${domain}" ;;
+    dev|app) echo "https://pubapi.registry.google/rdap/domain/${domain}" ;;
+    ai|io|me|sh|tools|codes|run|studio|gallery|media|chat|coffee|cafe|ventures|supply|agency|capital|community|social|group|team|market|deals|academy|school|training|care|clinic|band|money|finance|fund|tax|investments)
+      echo "https://rdap.identitydigital.services/rdap/domain/${domain}" ;;
+    xyz|build|art|game|quest|lol|inc|store|audio|fm)
+      echo "https://rdap.centralnic.com/${tld}/domain/${domain}" ;;
+    design) echo "https://rdap.nic.design/domain/${domain}" ;;
+    ink) echo "https://rdap.nic.ink/domain/${domain}" ;;
+    menu) echo "https://rdap.nic.menu/domain/${domain}" ;;
+    club) echo "https://rdap.nic.club/domain/${domain}" ;;
+    courses) echo "https://rdap.nic.courses/domain/${domain}" ;;
+    health) echo "https://rdap.nic.health/domain/${domain}" ;;
+    fit) echo "https://rdap.nic.fit/domain/${domain}" ;;
+    music) echo "https://rdap.registryservices.music/rdap/domain/${domain}" ;;
+    shop) echo "https://rdap.gmoregistry.net/rdap/domain/${domain}" ;;
+    ly) echo "https://rdap.nic.ly/domain/${domain}" ;;
+    is) echo "https://rdap.isnic.is/rdap/domain/${domain}" ;;
+    to) echo "https://rdap.tonicregistry.to/rdap/domain/${domain}" ;;
+    in) echo "https://rdap.nixiregistry.in/rdap/domain/${domain}" ;;
+    re) echo "https://rdap.nic.re/domain/${domain}" ;;
+    no) echo "https://rdap.norid.no/domain/${domain}" ;;
+    co|it|de|be|at|se|gg|st|pt|my|nu|am|es) echo "WHOIS" ;;
+    *) echo "https://rdap.org/domain/${domain}" ;;
+  esac
+}
+
+check_domain() {
+  local domain="$1" outfile="$2"
+  local url
+  url=$(rdap_url "$domain")
+  if [ "$url" = "WHOIS" ]; then
+    local result status
+    result=$(curl -s --max-time 10 -X POST \
+      -H "Content-Type: application/json" \
+      -d "{\"domain\":\"$domain\"}" \
+      https://domain-shark-proxy.mattjdalley.workers.dev/v1/whois-check)
+    status=$(echo "$result" | python3 -c "import sys,json; d=json.load(sys.stdin); s=d.get('status',''); print('404' if s=='available' else '200' if s=='taken' else '000')" 2>/dev/null)
+    [ -z "$status" ] && status="000"
+    echo "$status" > "$outfile"
+  else
+    curl -s -o /dev/null -w "%{http_code}" -L --max-time 10 "$url" > "$outfile"
+  fi
+}
+
+# Check all 10 standard matrix TLDs in parallel
+check_domain "brainstorm.com" "${TMPFILE}.brainstorm.com" &
+check_domain "brainstorm.dev" "${TMPFILE}.brainstorm.dev" &
+check_domain "brainstorm.io"  "${TMPFILE}.brainstorm.io"  &
+check_domain "brainstorm.ai"  "${TMPFILE}.brainstorm.ai"  &
+check_domain "brainstorm.co"  "${TMPFILE}.brainstorm.co"  &
+check_domain "brainstorm.app" "${TMPFILE}.brainstorm.app" &
+check_domain "brainstorm.xyz" "${TMPFILE}.brainstorm.xyz" &
+check_domain "brainstorm.me"  "${TMPFILE}.brainstorm.me"  &
+check_domain "brainstorm.sh"  "${TMPFILE}.brainstorm.sh"  &
+check_domain "brainstorm.cc"  "${TMPFILE}.brainstorm.cc"  &
 
 wait
 
@@ -131,11 +183,12 @@ After reading all results, check for any that returned something other than 200 
 2. Re-run the failed domains in parallel (≤5 concurrent, `--max-time 10`)
 3. Read the new results — they replace the originals
 
-This retry pattern applies everywhere RDAP checks are used (Step 3, Track B, brainstorm). rdap.org rate-limits aggressively, but a short wait almost always clears it.
+This retry pattern applies everywhere RDAP checks are used (Step 3, Track B, brainstorm). Some registries rate-limit after rapid requests, but a short wait almost always clears it.
 
 ```bash
 # After reading all STATUS_ variables above, retry any non-definitive results:
 # (Adapt this pattern — only retry domains where STATUS was not 200 or 404)
+# Uses rdap_url() and check_domain() defined above
 
 RETRYFILE=$(mktemp)
 # For each non-definitive result, append the domain to RETRYFILE:
@@ -144,7 +197,7 @@ RETRYFILE=$(mktemp)
 if [ -s "$RETRYFILE" ]; then
   sleep 10
   while IFS= read -r D; do
-    curl -s -o /dev/null -w "%{http_code}" -L --max-time 10 "https://rdap.org/domain/$D" > "${TMPFILE}.$D" &
+    check_domain "$D" "${TMPFILE}.$D" &
   done < "$RETRYFILE"
   wait
   # Re-read the retried results into their STATUS_ variables
@@ -277,7 +330,7 @@ When these signals are present, add a warning:
 
 When the user's requested domain is taken, automatically generate and check alternatives using the 5 strategies below. Run all RDAP checks in parallel (using the fallback chain from the Lookup Reference section for ccTLDs). Present only available domains, grouped by strategy.
 
-**IMPORTANT — Track B bash timeout:** Track B checks can run 30–50+ curl requests. Always set the bash timeout to at least 5 minutes (300000ms) for Track B commands. Use `--max-time 8` per curl to allow time for rdap.org's 302 redirect hop to the authoritative RDAP server.
+**IMPORTANT — Track B bash timeout:** Track B checks can run 30–50+ curl requests. Always set the bash timeout to at least 5 minutes (300000ms) for Track B commands. Use `--max-time 8` per curl to allow time for registry responses and WHOIS proxy lookups.
 
 Do not ask if the user wants alternatives — just run them. The user asked about that name and it was taken; finding alternatives is the obvious next move.
 
@@ -300,7 +353,7 @@ Generate and check close variations of the base name:
 - Hyphenated: `{base-hyphenated}.com` — always flag hyphens: "(Note: hyphens generally hurt branding and memorability)"
 - Abbreviation: truncate to a recognizable short form
 
-Check each variation against `.com` and `.io` at minimum. Run up to 10 concurrent RDAP checks per batch, with a 5-second `sleep` between batches (rdap.org rate-limits aggressively — 429 responses begin after ~20 rapid requests).
+Check each variation against `.com` and `.io` at minimum. Run up to 10 concurrent checks per batch, with a 5-second `sleep` between batches (some registries rate-limit after ~20 rapid requests).
 
 ### Strategy 3: Synonym & Thesaurus Exploration
 
@@ -344,25 +397,76 @@ Always verify a ccTLD exists and accepts registrations before suggesting it.
 ```bash
 TMPDIR=$(mktemp -d)
 
+# --- Domain availability routing (v1.4.0) ---
+rdap_url() {
+  local domain="$1"
+  local tld="${domain##*.}"
+  case "$tld" in
+    com) echo "https://rdap.verisign.com/com/v1/domain/${domain}" ;;
+    net) echo "https://rdap.verisign.com/net/v1/domain/${domain}" ;;
+    cc) echo "https://tld-rdap.verisign.com/cc/v1/domain/${domain}" ;;
+    dev|app) echo "https://pubapi.registry.google/rdap/domain/${domain}" ;;
+    ai|io|me|sh|tools|codes|run|studio|gallery|media|chat|coffee|cafe|ventures|supply|agency|capital|community|social|group|team|market|deals|academy|school|training|care|clinic|band|money|finance|fund|tax|investments)
+      echo "https://rdap.identitydigital.services/rdap/domain/${domain}" ;;
+    xyz|build|art|game|quest|lol|inc|store|audio|fm)
+      echo "https://rdap.centralnic.com/${tld}/domain/${domain}" ;;
+    design) echo "https://rdap.nic.design/domain/${domain}" ;;
+    ink) echo "https://rdap.nic.ink/domain/${domain}" ;;
+    menu) echo "https://rdap.nic.menu/domain/${domain}" ;;
+    club) echo "https://rdap.nic.club/domain/${domain}" ;;
+    courses) echo "https://rdap.nic.courses/domain/${domain}" ;;
+    health) echo "https://rdap.nic.health/domain/${domain}" ;;
+    fit) echo "https://rdap.nic.fit/domain/${domain}" ;;
+    music) echo "https://rdap.registryservices.music/rdap/domain/${domain}" ;;
+    shop) echo "https://rdap.gmoregistry.net/rdap/domain/${domain}" ;;
+    ly) echo "https://rdap.nic.ly/domain/${domain}" ;;
+    is) echo "https://rdap.isnic.is/rdap/domain/${domain}" ;;
+    to) echo "https://rdap.tonicregistry.to/rdap/domain/${domain}" ;;
+    in) echo "https://rdap.nixiregistry.in/rdap/domain/${domain}" ;;
+    re) echo "https://rdap.nic.re/domain/${domain}" ;;
+    no) echo "https://rdap.norid.no/domain/${domain}" ;;
+    co|it|de|be|at|se|gg|st|pt|my|nu|am|es) echo "WHOIS" ;;
+    *) echo "https://rdap.org/domain/${domain}" ;;
+  esac
+}
+
+check_domain() {
+  local domain="$1" outfile="$2"
+  local url
+  url=$(rdap_url "$domain")
+  if [ "$url" = "WHOIS" ]; then
+    local result status
+    result=$(curl -s --max-time 10 -X POST \
+      -H "Content-Type: application/json" \
+      -d "{\"domain\":\"$domain\"}" \
+      https://domain-shark-proxy.mattjdalley.workers.dev/v1/whois-check)
+    status=$(echo "$result" | python3 -c "import sys,json; d=json.load(sys.stdin); s=d.get('status',''); print('404' if s=='available' else '200' if s=='taken' else '000')" 2>/dev/null)
+    [ -z "$status" ] && status="000"
+    echo "$status" > "$outfile"
+  else
+    curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 "$url" > "$outfile"
+  fi
+}
+
 # --- Batch 1: Close variations + synonyms (10 max) ---
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/getbrainstorm.com   > "$TMPDIR/getbrainstorm.com"   &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/trybrainstorm.com   > "$TMPDIR/trybrainstorm.com"   &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/brainstormhq.com    > "$TMPDIR/brainstormhq.com"    &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/brainstormlabs.com  > "$TMPDIR/brainstormlabs.com"  &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/brainstormapp.com   > "$TMPDIR/brainstormapp.com"   &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/ideate.com          > "$TMPDIR/ideate.com"          &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/ideate.io           > "$TMPDIR/ideate.io"           &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/thinkstorm.com      > "$TMPDIR/thinkstorm.com"      &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/brainwave.io        > "$TMPDIR/brainwave.io"        &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/ideaforge.dev       > "$TMPDIR/ideaforge.dev"       &
+check_domain "getbrainstorm.com"  "$TMPDIR/getbrainstorm.com"  &
+check_domain "trybrainstorm.com"  "$TMPDIR/trybrainstorm.com"  &
+check_domain "brainstormhq.com"   "$TMPDIR/brainstormhq.com"   &
+check_domain "brainstormlabs.com" "$TMPDIR/brainstormlabs.com" &
+check_domain "brainstormapp.com"  "$TMPDIR/brainstormapp.com"  &
+check_domain "ideate.com"         "$TMPDIR/ideate.com"         &
+check_domain "ideate.io"          "$TMPDIR/ideate.io"          &
+check_domain "thinkstorm.com"     "$TMPDIR/thinkstorm.com"     &
+check_domain "brainwave.io"       "$TMPDIR/brainwave.io"       &
+check_domain "ideaforge.dev"      "$TMPDIR/ideaforge.dev"      &
 wait
 sleep 5
 
-# --- Batch 2: Creative + domain hacks (5 remaining) ---
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/mindspark.ai        > "$TMPDIR/mindspark.ai"        &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/neuronflow.com      > "$TMPDIR/neuronflow.com"      &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/brainstor.me        > "$TMPDIR/brainstor.me"        &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/brainstorm.is       > "$TMPDIR/brainstorm.is"       &
+# --- Batch 2: Creative + domain hacks ---
+check_domain "mindspark.ai"   "$TMPDIR/mindspark.ai"   &
+check_domain "neuronflow.com" "$TMPDIR/neuronflow.com" &
+check_domain "brainstor.me"   "$TMPDIR/brainstor.me"   &
+check_domain "brainstorm.is"  "$TMPDIR/brainstorm.is"  &
 wait
 
 # --- Retry: collect non-definitive results, wait 10s, re-check ---
@@ -375,14 +479,19 @@ for F in "$TMPDIR"/*; do
 done
 if [ -s "$RETRYFILE" ]; then
   sleep 10
+  BATCH=0
   while IFS= read -r D; do
-    curl -s -o /dev/null -w "%{http_code}" -L --max-time 10 "https://rdap.org/domain/$D" > "$TMPDIR/$D" &
+    check_domain "$D" "$TMPDIR/$D" &
+    BATCH=$((BATCH+1))
+    if [ $BATCH -ge 5 ]; then
+      wait; sleep 3; BATCH=0
+    fi
   done < "$RETRYFILE"
   wait
 fi
 rm -f "$RETRYFILE"
 
-# Read all results (404 = available, 200 = taken, else = ❓ — apply DoH fallback per lookup-reference.md)
+# Read all results (404 = available, 200 = taken, else = ❓)
 # Cleanup
 rm -rf "$TMPDIR"
 ```
@@ -570,9 +679,9 @@ Mix techniques across categories. The goal is a genuinely diverse set — if wav
 
 Check ALL generated names in parallel using RDAP. This means **50–100+ checks per wave** — batch them to avoid overwhelming the system.
 
-**IMPORTANT — bash timeout:** Bulk checks can run 50–100+ curl requests across multiple batches. Always set the bash timeout to at least 5 minutes (300000ms). Use `--max-time 8` per curl to allow time for rdap.org's redirect hop.
+**IMPORTANT — bash timeout:** Bulk checks can run 50–100+ curl requests across multiple batches. Always set the bash timeout to at least 5 minutes (300000ms). Use `--max-time 8` per curl to allow time for registry responses and WHOIS proxy lookups.
 
-**Batching strategy:** Run checks in groups of **10** concurrent processes max, with a **5-second `sleep` between batches** (rdap.org returns 429 after ~20 rapid requests). Wait for each batch to finish before starting the next.
+**Batching strategy:** Run checks in groups of **10** concurrent processes max, with a **5-second `sleep` between batches** (some registries rate-limit after ~20 rapid requests). Wait for each batch to finish before starting the next.
 
 For each name:
 - Standard dictionary names: check `.com` + 2–3 relevant alternatives (e.g., `.dev`, `.io`, `.ai`, `.app`, `.co`)
@@ -584,23 +693,74 @@ For each name:
 ```bash
 TMPDIR=$(mktemp -d)
 
+# --- Domain availability routing (v1.4.0) ---
+rdap_url() {
+  local domain="$1"
+  local tld="${domain##*.}"
+  case "$tld" in
+    com) echo "https://rdap.verisign.com/com/v1/domain/${domain}" ;;
+    net) echo "https://rdap.verisign.com/net/v1/domain/${domain}" ;;
+    cc) echo "https://tld-rdap.verisign.com/cc/v1/domain/${domain}" ;;
+    dev|app) echo "https://pubapi.registry.google/rdap/domain/${domain}" ;;
+    ai|io|me|sh|tools|codes|run|studio|gallery|media|chat|coffee|cafe|ventures|supply|agency|capital|community|social|group|team|market|deals|academy|school|training|care|clinic|band|money|finance|fund|tax|investments)
+      echo "https://rdap.identitydigital.services/rdap/domain/${domain}" ;;
+    xyz|build|art|game|quest|lol|inc|store|audio|fm)
+      echo "https://rdap.centralnic.com/${tld}/domain/${domain}" ;;
+    design) echo "https://rdap.nic.design/domain/${domain}" ;;
+    ink) echo "https://rdap.nic.ink/domain/${domain}" ;;
+    menu) echo "https://rdap.nic.menu/domain/${domain}" ;;
+    club) echo "https://rdap.nic.club/domain/${domain}" ;;
+    courses) echo "https://rdap.nic.courses/domain/${domain}" ;;
+    health) echo "https://rdap.nic.health/domain/${domain}" ;;
+    fit) echo "https://rdap.nic.fit/domain/${domain}" ;;
+    music) echo "https://rdap.registryservices.music/rdap/domain/${domain}" ;;
+    shop) echo "https://rdap.gmoregistry.net/rdap/domain/${domain}" ;;
+    ly) echo "https://rdap.nic.ly/domain/${domain}" ;;
+    is) echo "https://rdap.isnic.is/rdap/domain/${domain}" ;;
+    to) echo "https://rdap.tonicregistry.to/rdap/domain/${domain}" ;;
+    in) echo "https://rdap.nixiregistry.in/rdap/domain/${domain}" ;;
+    re) echo "https://rdap.nic.re/domain/${domain}" ;;
+    no) echo "https://rdap.norid.no/domain/${domain}" ;;
+    co|it|de|be|at|se|gg|st|pt|my|nu|am|es) echo "WHOIS" ;;
+    *) echo "https://rdap.org/domain/${domain}" ;;
+  esac
+}
+
+check_domain() {
+  local domain="$1" outfile="$2"
+  local url
+  url=$(rdap_url "$domain")
+  if [ "$url" = "WHOIS" ]; then
+    local result status
+    result=$(curl -s --max-time 10 -X POST \
+      -H "Content-Type: application/json" \
+      -d "{\"domain\":\"$domain\"}" \
+      https://domain-shark-proxy.mattjdalley.workers.dev/v1/whois-check)
+    status=$(echo "$result" | python3 -c "import sys,json; d=json.load(sys.stdin); s=d.get('status',''); print('404' if s=='available' else '200' if s=='taken' else '000')" 2>/dev/null)
+    [ -z "$status" ] && status="000"
+    echo "$status" > "$outfile"
+  else
+    curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 "$url" > "$outfile"
+  fi
+}
+
 # Batch 1 (domains 1-10)
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/vexapp.com    > "$TMPDIR/vexapp.com"    &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/vexapp.dev    > "$TMPDIR/vexapp.dev"    &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/zolt.io       > "$TMPDIR/zolt.io"       &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/zolt.dev      > "$TMPDIR/zolt.dev"      &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/gath.er       > "$TMPDIR/gath.er"       &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/lumora.com    > "$TMPDIR/lumora.com"    &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/lumora.io     > "$TMPDIR/lumora.io"     &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/codecraft.com > "$TMPDIR/codecraft.com" &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/codecraft.dev > "$TMPDIR/codecraft.dev" &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/novari.co     > "$TMPDIR/novari.co"     &
+check_domain "vexapp.com"    "$TMPDIR/vexapp.com"    &
+check_domain "vexapp.dev"    "$TMPDIR/vexapp.dev"    &
+check_domain "zolt.io"       "$TMPDIR/zolt.io"       &
+check_domain "zolt.dev"      "$TMPDIR/zolt.dev"      &
+check_domain "gath.er"       "$TMPDIR/gath.er"       &
+check_domain "lumora.com"    "$TMPDIR/lumora.com"    &
+check_domain "lumora.io"     "$TMPDIR/lumora.io"     &
+check_domain "codecraft.com" "$TMPDIR/codecraft.com" &
+check_domain "codecraft.dev" "$TMPDIR/codecraft.dev" &
+check_domain "novari.co"     "$TMPDIR/novari.co"     &
 wait
 sleep 5
 
 # Batch 2 (domains 11-20)
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/zentrik.com   > "$TMPDIR/zentrik.com"   &
-curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 https://rdap.org/domain/zentrik.io    > "$TMPDIR/zentrik.io"    &
+check_domain "zentrik.com"  "$TMPDIR/zentrik.com"  &
+check_domain "zentrik.io"   "$TMPDIR/zentrik.io"   &
 # ... (up to 10 total in this batch)
 wait
 sleep 5
@@ -619,7 +779,7 @@ if [ -s "$RETRYFILE" ]; then
   sleep 10
   BATCH=0
   while IFS= read -r D; do
-    curl -s -o /dev/null -w "%{http_code}" -L --max-time 10 "https://rdap.org/domain/$D" > "$TMPDIR/$D" &
+    check_domain "$D" "$TMPDIR/$D" &
     BATCH=$((BATCH+1))
     if [ $BATCH -ge 5 ]; then
       wait; sleep 3; BATCH=0
@@ -912,6 +1072,7 @@ Use `python3 -c` for JSON parsing — do not assume `jq` is installed.
 
 Detailed lookup tables are in `references/` — consult them as needed:
 
+- **`references/rdap-endpoints.md`** — Full RDAP endpoint map for all 77 TLDs, canonical `rdap_url()` function, WHOIS server mapping, fallback chain diagram
 - **`references/lookup-reference.md`** — RDAP command and status codes, DoH fallback via curl, full fallback chain diagram, graceful degradation threshold and response format
 - **`references/tld-catalog.md`** — Thematic TLD pairings by project type (12 categories), domain hack catalog with 22 ccTLDs and curated examples
 - **`references/registrar-routing.md`** — TLD-to-registrar routing table. Determines whether buy links go to name.com or Dynadot based on TLD. **Always consult this table when generating registration links.**

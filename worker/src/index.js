@@ -1,3 +1,5 @@
+import { connect } from 'cloudflare:sockets';
+
 /**
  * Domain Shark — Cloudflare Worker Proxy
  * Premium domain lookup via Fastly Domain Research API (Domainr)
@@ -121,11 +123,6 @@ function getCurrentMonth() {
   const year = now.getUTCFullYear();
   const month = String(now.getUTCMonth() + 1).padStart(2, '0');
   return `${year}-${month}`;
-}
-
-/** Returns the current UTC minute boundary as a Unix timestamp (truncated to the minute). */
-function getCurrentMinuteTimestamp() {
-  return Math.floor(Date.now() / 60000);
 }
 
 // ---------------------------------------------------------------------------
@@ -269,45 +266,217 @@ async function sendBreakerAlert(env, month, count, limit) {
   }
 }
 
+
 // ---------------------------------------------------------------------------
-// IP rate limiting
+// WHOIS availability checking (Layer 2 — 13 ccTLDs without RDAP)
 // ---------------------------------------------------------------------------
 
-/**
- * Checks whether the client IP has exceeded the per-minute burst limit (10 req/min).
- *
- * KV key: ratelimit:{clientIP}:{minuteTimestamp}
- * KV value: { "count": N }
- * TTL: 120 seconds
- *
- * Returns { limited: bool }.
- * Fails open if KV is unavailable.
- */
-async function checkRateLimit(env, clientIP) {
-  if (!env.QUOTA_KV) {
-    return { limited: false };
-  }
+const WHOIS_SERVERS = {
+  co: 'whois.registry.co',
+  it: 'whois.nic.it',
+  de: 'whois.denic.de',
+  be: 'whois.dns.be',
+  at: 'whois.nic.at',
+  se: 'whois.iis.se',
+  gg: 'whois.gg',
+  st: 'whois.nic.st',
+  pt: 'whois.dns.pt',
+  my: 'whois.mynic.my',
+  nu: 'whois.iis.nu',
+  am: 'whois.amnic.net',
+  es: 'whois.nic.es',
+};
 
-  const RATE_LIMIT = 10;
+const SUPPORTED_WHOIS_TLDS = new Set(Object.keys(WHOIS_SERVERS));
 
+// Most WHOIS servers accept plain "domain\r\n". Exceptions listed here.
+const WHOIS_QUERY_FORMATS = {
+  'whois.denic.de': (domain) => `-T dn,ace ${domain}\r\n`,
+};
+
+function buildWhoisQuery(domain, server) {
+  const formatter = WHOIS_QUERY_FORMATS[server];
+  return formatter ? formatter(domain) : `${domain}\r\n`;
+}
+
+const WHOIS_PARSERS = {
+  'whois.registry.co': (r) => {
+    if (/DOMAIN NOT FOUND/i.test(r)) return 'available';
+    if (/Domain Name:/i.test(r)) return 'taken';
+    return 'unknown';
+  },
+  'whois.nic.it': (r) => {
+    if (/AVAILABLE/i.test(r) || /Status:\s*AVAILABLE/i.test(r)) return 'available';
+    if (/Domain:/i.test(r) && /Status:/i.test(r)) return 'taken';
+    return 'unknown';
+  },
+  'whois.denic.de': (r) => {
+    if (/^Status:\s*free/im.test(r)) return 'available';
+    if (/^Domain:/im.test(r)) return 'taken';
+    return 'unknown';
+  },
+  'whois.dns.be': (r) => {
+    if (/Status:\s*NOT\s+AVAILABLE/i.test(r)) return 'taken';
+    if (/Status:\s*AVAILABLE/i.test(r)) return 'available';
+    if (/Registered:/i.test(r)) return 'taken';
+    return 'unknown';
+  },
+  'whois.nic.at': (r) => {
+    if (/nothing found/i.test(r)) return 'available';
+    if (/domain:/i.test(r)) return 'taken';
+    return 'unknown';
+  },
+  'whois.iis.se': (r) => {
+    if (/not found/i.test(r)) return 'available';
+    if (/domain:/i.test(r)) return 'taken';
+    return 'unknown';
+  },
+  'whois.gg': (r) => {
+    if (/NOT FOUND/i.test(r)) return 'available';
+    if (/Domain:/i.test(r)) return 'taken';
+    return 'unknown';
+  },
+  'whois.nic.st': (r) => {
+    if (!/Domain Name:/i.test(r)) return 'available';
+    if (/Domain Name:/i.test(r)) return 'taken';
+    return 'unknown';
+  },
+  'whois.dns.pt': (r) => {
+    if (/not found/i.test(r) || !/Domain:/i.test(r)) return 'available';
+    if (/Domain:/i.test(r)) return 'taken';
+    return 'unknown';
+  },
+  'whois.mynic.my': (r) => {
+    if (!/Domain Name:/i.test(r)) return 'available';
+    if (/Domain Name:/i.test(r)) return 'taken';
+    return 'unknown';
+  },
+  'whois.iis.nu': (r) => {
+    if (/not found/i.test(r)) return 'available';
+    if (/domain:/i.test(r)) return 'taken';
+    return 'unknown';
+  },
+  'whois.amnic.net': (r) => {
+    if (/No match/i.test(r)) return 'available';
+    if (/Domain Name:/i.test(r)) return 'taken';
+    return 'unknown';
+  },
+  'whois.nic.es': (r) => {
+    // .es WHOIS requires IP authorization — most queries will fail
+    if (/LIBRE/i.test(r) || /no encontrado/i.test(r)) return 'available';
+    if (/Nombre de dominio:/i.test(r) || /Domain Name:/i.test(r)) return 'taken';
+    return 'unknown';
+  },
+};
+
+function parseWhoisResponse(response, server) {
+  if (!response || response.trim().length === 0) return 'unknown';
+  const parser = WHOIS_PARSERS[server];
+  return parser ? parser(response) : 'unknown';
+}
+
+const MAX_WHOIS_RESPONSE = 10 * 1024; // 10KB guard
+const WHOIS_TIMEOUT_MS = 5000; // 5-second timeout
+
+async function whoisLookup(domain, server) {
+  const query = buildWhoisQuery(domain, server);
+  let socket;
   try {
-    const minute = getCurrentMinuteTimestamp();
-    const key = `ratelimit:${clientIP}:${minute}`;
-    const raw = await env.QUOTA_KV.get(key);
-    const count = raw ? (JSON.parse(raw).count || 0) : 0;
+    socket = connect({ hostname: server, port: 43 });
 
-    if (count >= RATE_LIMIT) {
-      return { limited: true };
+    // Write query — release lock without closing to keep socket open for reading
+    const writer = socket.writable.getWriter();
+    await writer.write(new TextEncoder().encode(query));
+    writer.releaseLock();
+
+    // Read response with timeout and size guard
+    const reader = socket.readable.getReader();
+    let response = '';
+    const deadline = Date.now() + WHOIS_TIMEOUT_MS;
+
+    try {
+      while (true) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) break;
+
+        const readPromise = reader.read();
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), remaining)
+        );
+
+        let result;
+        try {
+          result = await Promise.race([readPromise, timeoutPromise]);
+        } catch {
+          break; // Timeout
+        }
+
+        const { done, value } = result;
+        if (done) break;
+        response += new TextDecoder().decode(value);
+        if (response.length > MAX_WHOIS_RESPONSE) break; // Size guard
+      }
+    } finally {
+      reader.releaseLock();
     }
 
-    // Increment the counter for this minute window
-    const newValue = JSON.stringify({ count: count + 1 });
-    await env.QUOTA_KV.put(key, newValue, { expirationTtl: 120 });
-    return { limited: false };
+    return response;
   } catch {
-    // KV failure — fail open
-    return { limited: false };
+    return ''; // Connection failure
+  } finally {
+    if (socket) {
+      try { socket.close(); } catch { /* ignore */ }
+    }
   }
+}
+
+async function handleWhoisCheck(request, env) {
+  // No rate limiting — WHOIS servers handle their own rate limits,
+  // and this endpoint has no paid API costs to protect.
+
+  // Enforce Content-Type
+  const contentType = request.headers.get('Content-Type') || '';
+  if (!contentType.includes('application/json')) {
+    return errorResponse(400, 'bad_request', 'Content-Type must be application/json');
+  }
+
+  // Parse body
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse(400, 'bad_request', 'Request body is not valid JSON');
+  }
+
+  const { domain } = body;
+
+  // Validate domain
+  if (!domain) {
+    return errorResponse(400, 'bad_request', 'Missing required field: domain');
+  }
+  if (typeof domain !== 'string') {
+    return errorResponse(400, 'bad_request', 'Field "domain" must be a string');
+  }
+  if (!isValidDomain(domain)) {
+    return errorResponse(400, 'bad_request', 'Invalid domain format');
+  }
+
+  // TLD whitelist — only accept the 13 supported WHOIS TLDs
+  const tld = domain.split('.').pop().toLowerCase();
+  if (!SUPPORTED_WHOIS_TLDS.has(tld)) {
+    return errorResponse(400, 'unsupported_tld', `TLD .${tld} is not supported by WHOIS check. Use RDAP instead.`);
+  }
+
+  const server = WHOIS_SERVERS[tld];
+  if (!server) {
+    return errorResponse(400, 'unsupported_tld', `No WHOIS server configured for .${tld}`);
+  }
+
+  // Perform WHOIS lookup — domain name is used only for the query, never logged
+  const whoisResponse = await whoisLookup(domain, server);
+  const status = parseWhoisResponse(whoisResponse, server);
+
+  return jsonResponse({ status });
 }
 
 // ---------------------------------------------------------------------------
@@ -320,15 +489,6 @@ async function handlePremiumCheck(request, env) {
 
   // Extract client IP first — needed for quota and rate limit checks
   const clientIP = getClientIP(request);
-
-  // --- Rate limit check ---
-  const { limited } = await checkRateLimit(env, clientIP);
-  if (limited) {
-    return jsonResponse(
-      { error: 'rate_limited', message: 'Rate limit exceeded. Please try again later.' },
-      429
-    );
-  }
 
   // --- Global circuit breaker check ---
   const { open } = await checkCircuitBreaker(env, monthlyQuotaLimit);
@@ -441,6 +601,11 @@ export default {
       // Route: POST /v1/premium-check
       if (request.method === 'POST' && url.pathname === '/v1/premium-check') {
         return await handlePremiumCheck(request, env);
+      }
+
+      // Route: POST /v1/whois-check
+      if (request.method === 'POST' && url.pathname === '/v1/whois-check') {
+        return await handleWhoisCheck(request, env);
       }
 
       // All other routes → 404
