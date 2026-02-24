@@ -1,6 +1,6 @@
 # RDAP Endpoint Map
 
-Canonical reference for all 77 TLDs supported by Domain Shark. Documents the exact RDAP endpoint per registry, the `rdap_url()` bash function used in all SKILL.md templates, and the fallback chain.
+Canonical reference for all 77 TLDs supported by Domain Puppy. Documents the exact RDAP endpoint per registry, the `rdap_url()` bash function used in all SKILL.md templates, and the fallback chain.
 
 ---
 

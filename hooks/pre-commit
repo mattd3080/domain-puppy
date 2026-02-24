@@ -1,5 +1,5 @@
 #!/bin/sh
-# Domain Shark — pre-commit secret scanner
+# Domain Puppy — pre-commit secret scanner
 # Blocks commits that appear to contain API tokens or secrets.
 #
 # Install: cp hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit

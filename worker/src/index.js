@@ -1,7 +1,7 @@
 import { connect } from 'cloudflare:sockets';
 
 /**
- * Domain Shark — Cloudflare Worker Proxy
+ * Domain Puppy — Cloudflare Worker Proxy
  * Premium domain lookup via Fastly Domain Research API (Domainr)
  *
  * Privacy: domain names are never logged. Only aggregate metrics are tracked.
@@ -257,8 +257,8 @@ async function sendBreakerAlert(env, month, count, limit) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        text: `Domain Shark circuit breaker tripped for ${month}. ${count}/${limit} requests used. Premium search is now disabled until next month.`,
-        content: `Domain Shark circuit breaker tripped for ${month}. ${count}/${limit} requests used. Premium search is now disabled until next month.`,
+        text: `Domain Puppy circuit breaker tripped for ${month}. ${count}/${limit} requests used. Premium search is now disabled until next month.`,
+        content: `Domain Puppy circuit breaker tripped for ${month}. ${count}/${limit} requests used. Premium search is now disabled until next month.`,
       }),
     });
   } catch {

@@ -1,8 +1,8 @@
-# Domain Shark
+# Domain Puppy
 
 **AI-powered domain brainstorming and availability checking — right in your terminal.**
 
-Domain Shark is a Claude Code skill that turns your terminal into a domain research powerhouse. Brainstorm hundreds of creative names, check availability in seconds, and find aftermarket gems — all without leaving your editor. Claude activates it automatically when you mention needing a domain, or you can invoke it directly.
+Domain Puppy is a Claude Code skill that turns your terminal into a domain research powerhouse. Brainstorm hundreds of creative names, check availability in seconds, and find aftermarket gems — all without leaving your editor. Claude activates it automatically when you mention needing a domain, or you can invoke it directly.
 
 ---
 
@@ -19,10 +19,10 @@ Domain Shark is a Claude Code skill that turns your terminal into a domain resea
 ## Installation
 
 ```bash
-npx skills add mattd3080/domain-shark
+npx skills add mattd3080/domain-puppy
 ```
 
-That's it. Claude will automatically activate Domain Shark when you mention needing a domain, or invoke it directly: "use domain shark" or "check if brainstorm.com is available".
+That's it. Claude will automatically activate Domain Puppy when you mention needing a domain, or invoke it directly: "use domain puppy" or "check if brainstorm.com is available".
 
 ---
 
@@ -35,10 +35,10 @@ is brainstorm.com available?
 ```
 or invoke directly:
 ```
-use domain shark — check brainstorm.com
+use domain puppy — check brainstorm.com
 ```
 
-Domain Shark checks availability across a 10-TLD matrix and returns results:
+Domain Puppy checks availability across a 10-TLD matrix and returns results:
 
 ```
 ✅ brainstorm.io       — Available — Register at name.com
@@ -55,7 +55,7 @@ Domain Shark checks availability across a 10-TLD matrix and returns results:
 > A project management tool for remote teams
 ```
 
-Domain Shark generates waves of names — Quick Wave (fast ideas), Standard Wave (refined variations), Deep Dive (creative combinations) — checking availability for each batch as it goes.
+Domain Puppy generates waves of names — Quick Wave (fast ideas), Standard Wave (refined variations), Deep Dive (creative combinations) — checking availability for each batch as it goes.
 
 ---
 
@@ -77,7 +77,7 @@ Domain Shark generates waves of names — Quick Wave (fast ideas), Standard Wave
 
 ## Premium Search Setup (Optional)
 
-By default, Domain Shark includes **5 free premium aftermarket checks per month** — no setup needed.
+By default, Domain Puppy includes **5 free premium aftermarket checks per month** — no setup needed.
 
 For unlimited premium searches, add your own [Fastly API token](https://manage.fastly.com/account/personal/tokens) (free with a Fastly account):
 
@@ -88,9 +88,9 @@ Just say "I want to add my API key" during a `/domain` session — Claude will p
 **Option B: Manual setup**
 
 ```bash
-mkdir -p ~/.claude/domain-shark && chmod 700 ~/.claude/domain-shark
-echo '{ "fastlyApiToken": "your-token-here" }' > ~/.claude/domain-shark/config.json
-chmod 600 ~/.claude/domain-shark/config.json
+mkdir -p ~/.claude/domain-puppy && chmod 700 ~/.claude/domain-puppy
+echo '{ "fastlyApiToken": "your-token-here" }' > ~/.claude/domain-puppy/config.json
+chmod 600 ~/.claude/domain-puppy/config.json
 ```
 
 Once set, all premium searches bypass the shared proxy and use your key directly.
@@ -99,14 +99,14 @@ Once set, all premium searches bypass the shared proxy and use your key directly
 
 ## Privacy Policy
 
-> Domain Shark does not log, store, or analyze the domains you search for. Our proxy processes your request and discards it. We only track aggregate usage counts to manage our free tier quota.
+> Domain Puppy does not log, store, or analyze the domains you search for. Our proxy processes your request and discards it. We only track aggregate usage counts to manage our free tier quota.
 
 Additional details:
 
 - **Free RDAP/WHOIS/DNS checks** go directly from your machine — we never see them
 - **Premium search via proxy** — your domain is forwarded to Fastly's Domain Research API and not stored by us
 - **With your own API key** — premium searches bypass our proxy entirely and go straight to the Fastly API
-- **Config file** is stored at `~/.claude/domain-shark/config.json` with `chmod 600` (owner-read-only)
+- **Config file** is stored at `~/.claude/domain-puppy/config.json` with `chmod 600` (owner-read-only)
 
 ---
 
@@ -135,7 +135,7 @@ The Cloudflare Worker proxy (`worker/src/index.js`) sits between free-tier users
 
 ### Deployed Endpoint
 
-`https://domain-shark-proxy.mattjdalley.workers.dev/v1/premium-check`
+`https://domain-puppy-proxy.mattjdalley.workers.dev/v1/premium-check`
 
 ### Protection Layers
 
@@ -160,7 +160,7 @@ All guards use Cloudflare KV for state and **fail open** — if KV is unavailabl
 ### Known Limitations
 
 - **KV eventual consistency**: Cloudflare KV writes can take up to 60 seconds to propagate globally. Under heavy concurrent load, the circuit breaker could overshoot by a few hundred requests before all edge nodes see the updated counter.
-- **No edge rate limiting on workers.dev**: Cloudflare's WAF rate limiting rules only apply to custom domains, not `*.workers.dev` subdomains. To add a hard backstop at the Cloudflare edge, set up a custom domain (e.g., `api.domainshark.dev`) and add a rate limiting rule there.
+- **No edge rate limiting on workers.dev**: Cloudflare's WAF rate limiting rules only apply to custom domains, not `*.workers.dev` subdomains. To add a hard backstop at the Cloudflare edge, set up a custom domain (e.g., `api.domainpuppy.dev`) and add a rate limiting rule there.
 
 ### Secrets & Environment Variables
 
@@ -200,7 +200,7 @@ wrangler secret put FASTLY_API_TOKEN
 wrangler deploy
 ```
 
-Then find and replace `https://domain-shark-proxy.mattjdalley.workers.dev/v1/premium-check` in `skills/domain/SKILL.md` with your deployed worker URL.
+Then find and replace `https://domain-puppy-proxy.mattjdalley.workers.dev/v1/premium-check` in `skills/domain/SKILL.md` with your deployed worker URL.
 
 ### Secret leak prevention
 
@@ -223,7 +223,7 @@ wrangler secret put ALERT_WEBHOOK
 
 For a hard backstop beyond the KV-based circuit breaker:
 
-1. Add a custom domain to Cloudflare (e.g., `api.domainshark.dev`)
+1. Add a custom domain to Cloudflare (e.g., `api.domainpuppy.dev`)
 2. Route the worker to that domain via `wrangler.toml` or the Cloudflare dashboard
 3. Add a WAF Rate Limiting rule on that zone capping `/v1/premium-check` at your desired monthly limit
 

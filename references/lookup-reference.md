@@ -31,9 +31,9 @@ Status codes:
 
 ## Worker WHOIS Proxy (Layer 2 — 13 ccTLDs)
 
-For TLDs without RDAP support (`.co`, `.it`, `.de`, `.be`, `.at`, `.se`, `.gg`, `.st`, `.pt`, `.my`, `.nu`, `.am`, `.es`), availability is checked via the Domain Shark worker's WHOIS proxy.
+For TLDs without RDAP support (`.co`, `.it`, `.de`, `.be`, `.at`, `.se`, `.gg`, `.st`, `.pt`, `.my`, `.nu`, `.am`, `.es`), availability is checked via the Domain Puppy worker's WHOIS proxy.
 
-Endpoint: `POST https://domain-shark-proxy.mattjdalley.workers.dev/v1/whois-check`
+Endpoint: `POST https://domain-puppy-proxy.mattjdalley.workers.dev/v1/whois-check`
 
 Request: `{"domain": "example.co"}`
 

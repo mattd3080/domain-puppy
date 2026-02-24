@@ -1,4 +1,4 @@
-name = "domain-shark-proxy"
+name = "domain-puppy-proxy"
 main = "src/index.js"
 compatibility_date = "2024-01-01"
 

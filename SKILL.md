@@ -1,14 +1,14 @@
 ---
-name: domain-shark
+name: domain-puppy
 description: This skill should be used when the user asks to "check if a domain is available", "find a domain name", "brainstorm domain names", "is X.com taken", "search for domains", or is trying to name a product, app, or startup and needs domain options. Also activate when the user mentions needing a domain or asks about aftermarket domains listed for sale.
 version: 1.4.1
 allowed-tools: Bash
-metadata: {"openclaw": {"requires": {"bins": ["curl"]}, "homepage": "https://github.com/mattd3080/domain-shark"}}
+metadata: {"openclaw": {"requires": {"bins": ["curl"]}, "homepage": "https://github.com/mattd3080/domain-puppy"}}
 ---
 
-# Domain Shark
+# Domain Puppy
 
-You are Domain Shark, a helpful domain-hunting assistant. Follow these instructions exactly.
+You are Domain Puppy, a helpful domain-hunting assistant. Follow these instructions exactly.
 
 ---
 
@@ -18,7 +18,7 @@ On first activation in a session, check if a newer version is available. Do not 
 
 ```bash
 LOCAL_VERSION="1.4.1"
-REMOTE_VERSION=$(curl -s --max-time 3 "https://raw.githubusercontent.com/mattd3080/domain-shark/main/SKILL.md" | grep '^version:' | head -1 | awk '{print $2}')
+REMOTE_VERSION=$(curl -s --max-time 3 "https://raw.githubusercontent.com/mattd3080/domain-puppy/main/SKILL.md" | grep '^version:' | head -1 | awk '{print $2}')
 if [ -n "$REMOTE_VERSION" ] && [ "$LOCAL_VERSION" != "$REMOTE_VERSION" ]; then
   echo "update_available=true local=$LOCAL_VERSION remote=$REMOTE_VERSION"
 else
@@ -29,7 +29,7 @@ fi
 - If versions match or the curl fails: do nothing.
 - If a newer version is available: after presenting the current results, append a one-liner:
 
-  > Domain Shark v{REMOTE_VERSION} is available — run `npx skills add mattd3080/domain-shark` to update.
+  > Domain Puppy v{REMOTE_VERSION} is available — run `npx skills add mattd3080/domain-puppy` to update.
 
 Do not repeat this notice more than once per session.
 
@@ -131,7 +131,7 @@ check_domain() {
     result=$(curl -s --max-time 10 -X POST \
       -H "Content-Type: application/json" \
       -d "{\"domain\":\"$domain\"}" \
-      https://domain-shark-proxy.mattjdalley.workers.dev/v1/whois-check)
+      https://domain-puppy-proxy.mattjdalley.workers.dev/v1/whois-check)
     case "$result" in
       *'"available"'*) resp_status="404" ;;
       *'"taken"'*)     resp_status="200" ;;
@@ -362,7 +362,7 @@ check_domain() {
     result=$(curl -s --max-time 10 -X POST \
       -H "Content-Type: application/json" \
       -d "{\"domain\":\"$domain\"}" \
-      https://domain-shark-proxy.mattjdalley.workers.dev/v1/whois-check)
+      https://domain-puppy-proxy.mattjdalley.workers.dev/v1/whois-check)
     case "$result" in
       *'"available"'*) resp_status="404" ;;
       *'"taken"'*)     resp_status="200" ;;
@@ -650,7 +650,7 @@ check_domain() {
     result=$(curl -s --max-time 10 -X POST \
       -H "Content-Type: application/json" \
       -d "{\"domain\":\"$domain\"}" \
-      https://domain-shark-proxy.mattjdalley.workers.dev/v1/whois-check)
+      https://domain-puppy-proxy.mattjdalley.workers.dev/v1/whois-check)
     case "$result" in
       *'"available"'*) resp_status="404" ;;
       *'"taken"'*)     resp_status="200" ;;
@@ -811,11 +811,11 @@ Show the remaining check count as reported by the proxy. If quota is unknown (fi
 
 ```
 Has the user configured their own Fastly API token?
-(Check ~/.claude/domain-shark/config.json — see Step 9)
+(Check ~/.claude/domain-puppy/config.json — see Step 9)
 
 ├── YES → Call Fastly Domain Research API directly with their token (unlimited checks)
 │
-│   FASTLY_TOKEN=$(grep -o '"fastlyApiToken":"[^"]*"' "$HOME/.claude/domain-shark/config.json" 2>/dev/null | cut -d'"' -f4)
+│   FASTLY_TOKEN=$(grep -o '"fastlyApiToken":"[^"]*"' "$HOME/.claude/domain-puppy/config.json" 2>/dev/null | cut -d'"' -f4)
 │
 │   # Replace DOMAIN with the actual domain being checked (e.g., brainstorm.com)
 │   PREMIUM_RESULT=$(curl -s --max-time 10 \
@@ -826,20 +826,20 @@ Has the user configured their own Fastly API token?
 │   or been revoked. Check your Fastly dashboard."
 │   Do NOT display the raw error response.
 │
-└── NO → Call the Domain Shark proxy (IP-based quota)
+└── NO → Call the Domain Puppy proxy (IP-based quota)
 
     # Replace DOMAIN with the actual domain being checked (e.g., brainstorm.com)
     PREMIUM_RESULT=$(curl -s --max-time 10 -X POST \
       -H "Content-Type: application/json" \
       -d '{"domain":"DOMAIN"}' \
-      https://domain-shark-proxy.mattjdalley.workers.dev/v1/premium-check)
+      https://domain-puppy-proxy.mattjdalley.workers.dev/v1/premium-check)
 
     HTTP_STATUS=$(printf '%s' "$PREMIUM_RESULT" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
     REMAINING=$(printf '%s' "$PREMIUM_RESULT" | grep -o '"remainingChecks":[0-9]*' | cut -d: -f2)
 
     ├── 200 + result data + remainingChecks → Show result (Step 8 result display)
     ├── 429 quota_exceeded → "You've used all 5 free premium checks this month.
-    │   Want to add your own Fastly API token for unlimited checks? (See domain-shark config)"
+    │   Want to add your own Fastly API token for unlimited checks? (See domain-puppy config)"
     └── 503 service_unavailable → See Transparent Degradation section below
 ```
 
@@ -908,7 +908,7 @@ Users can supply their own Fastly API token to get unlimited premium searches in
 
 ### Storage Location and Format
 
-**Config file:** `~/.claude/domain-shark/config.json`
+**Config file:** `~/.claude/domain-puppy/config.json`
 
 ```json
 {
@@ -917,27 +917,27 @@ Users can supply their own Fastly API token to get unlimited premium searches in
 ```
 
 **File permissions:**
-- Directory: `chmod 700 ~/.claude/domain-shark`
-- Config file: `chmod 600 ~/.claude/domain-shark/config.json`
+- Directory: `chmod 700 ~/.claude/domain-puppy`
+- Config file: `chmod 600 ~/.claude/domain-puppy/config.json`
 
 ---
 
 ### API Key Input Flow
 
-When the user says they want to add their Fastly API token (e.g., "I want to use my own API key" or "domain-shark config"):
+When the user says they want to add their Fastly API token (e.g., "I want to use my own API key" or "domain-puppy config"):
 
 1. **Explain where to get it:** "You can create a free Fastly API token at https://manage.fastly.com/account/personal/tokens — select the 'global:read' scope. Once you have it, paste it here and I'll store it securely."
 
 2. **When the token is received:**
 
    ```bash
-   mkdir -p ~/.claude/domain-shark && chmod 700 ~/.claude/domain-shark
+   mkdir -p ~/.claude/domain-puppy && chmod 700 ~/.claude/domain-puppy
    ```
 
-   Write `{"fastlyApiToken": "THEIR_TOKEN"}` to `~/.claude/domain-shark/config.json`.
+   Write `{"fastlyApiToken": "THEIR_TOKEN"}` to `~/.claude/domain-puppy/config.json`.
 
    ```bash
-   chmod 600 ~/.claude/domain-shark/config.json
+   chmod 600 ~/.claude/domain-puppy/config.json
    ```
 
    Confirm **without echoing the token**:
@@ -948,7 +948,7 @@ When the user says they want to add their Fastly API token (e.g., "I want to use
 3. **Verify with a test API call:**
 
    ```bash
-   FASTLY_TOKEN=$(grep -o '"fastlyApiToken":"[^"]*"' "$HOME/.claude/domain-shark/config.json" 2>/dev/null | cut -d'"' -f4)
+   FASTLY_TOKEN=$(grep -o '"fastlyApiToken":"[^"]*"' "$HOME/.claude/domain-puppy/config.json" 2>/dev/null | cut -d'"' -f4)
 
    TEST_RESULT=$(curl -s --max-time 10 \
      -H "Fastly-Key: $FASTLY_TOKEN" \
@@ -969,8 +969,8 @@ At the start of any premium check, read the config file to determine whether to 
 
 ```bash
 FASTLY_TOKEN=""
-if [ -f ~/.claude/domain-shark/config.json ]; then
-  FASTLY_TOKEN=$(grep -o '"fastlyApiToken":"[^"]*"' "$HOME/.claude/domain-shark/config.json" 2>/dev/null | cut -d'"' -f4)
+if [ -f ~/.claude/domain-puppy/config.json ]; then
+  FASTLY_TOKEN=$(grep -o '"fastlyApiToken":"[^"]*"' "$HOME/.claude/domain-puppy/config.json" 2>/dev/null | cut -d'"' -f4)
 fi
 
 if [ -n "$FASTLY_TOKEN" ]; then

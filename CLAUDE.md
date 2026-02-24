@@ -1,4 +1,4 @@
-# Domain Shark — Project Instructions
+# Domain Puppy — Project Instructions
 
 ## Internal docs
 
@@ -21,7 +21,7 @@ When creating any of the following, put them in `internal/`:
 ## Project structure
 
 ```
-domain-shark/
+domain-puppy/
 ├── SKILL.md            # The skill (repo root — required by npx skills add)
 ├── CLAUDE.md           # This file
 ├── README.md           # Public-facing docs
@@ -30,12 +30,12 @@ domain-shark/
 └── worker/             # Cloudflare Worker proxy
 ```
 
-Install command: `npx skills add mattd3080/domain-shark`
+Install command: `npx skills add mattd3080/domain-puppy`
 
 ## Worker
 
 The Cloudflare Worker is deployed at:
-`https://domain-shark-proxy.mattjdalley.workers.dev/v1/premium-check`
+`https://domain-puppy-proxy.mattjdalley.workers.dev/v1/premium-check`
 
 Secrets live in Cloudflare (never in files):
 - `FASTLY_API_TOKEN` — set via `wrangler secret put FASTLY_API_TOKEN`
