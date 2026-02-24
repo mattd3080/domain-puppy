@@ -226,14 +226,13 @@ Then immediately run `open "{registrar search URL for domain}"` to open the regi
 That's it — no TLD matrix. Show the result and open the link.
 
 **Registry Premium Proactive Warning:** Flag likely premium candidates based on these signals:
-- Single dictionary word on **any** TLD (not just popular ones — registries across all gTLDs reserve common words as premiums)
-- Very short name (1–4 characters) on any TLD
-- Common English word, name, place, or noun (e.g., "laurel", "cloud", "travel", "blue", "summit")
-- Word that directly matches the TLD's theme (e.g., "coffee.shop", "pixel.art", "cloud.dev", "travel.agency")
+- Single dictionary word on a popular TLD (`.com`, `.io`, `.ai`)
+- Very short name (1–4 characters)
+- Common English word
 
-**Any one** of these signals is enough to trigger the warning. When present, add:
+When these signals are present, add a warning:
 
-> "Heads up — this looks like it could be a registry premium. Common words, short names, and names that match a TLD's theme are often reserved at elevated pricing ($100 to $10,000+/year) with higher renewal costs every year. The registrar page will show the exact price — check before committing."
+> "Heads up — this is a short, common word on a popular TLD. These are often registry premiums that can cost anywhere from $100 to $10,000+/year, with elevated renewal costs every year. Check the exact price before committing."
 
 ### If the domain is TAKEN:
 
