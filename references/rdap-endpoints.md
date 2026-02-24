@@ -1,6 +1,6 @@
 # RDAP Endpoint Map
 
-Canonical reference for all 77 TLDs supported by Domain Puppy. Documents the exact RDAP endpoint per registry, the `rdap_url()` bash function used in all SKILL.md templates, and the fallback chain.
+Canonical reference for all 77 TLDs supported by Domain Shark. Documents the exact RDAP endpoint per registry, the `rdap_url()` bash function used in all SKILL.md templates, and the fallback chain.
 
 ---
 
@@ -108,7 +108,7 @@ Endpoint pattern: `https://rdap.centralnic.com/{tld}/domain/{d}` (note: TLD is i
 
 ---
 
-## Layer 2 — Worker WHOIS Proxy (13 TLDs)
+## Layer 2 — Worker WHOIS Proxy (12 TLDs)
 
 No RDAP available. Routed through the worker's WHOIS proxy.
 
@@ -126,7 +126,14 @@ No RDAP available. Routed through the worker's WHOIS proxy.
 | .my | whois.mynic.my |
 | .nu | whois.iis.nu |
 | .am | whois.amnic.net |
-| .es | whois.nic.es ⚠️ IP auth required |
+
+---
+
+## Unreliable WHOIS — Skipped (1 TLD)
+
+| TLD | WHOIS server | Reason |
+|-----|-------------|--------|
+| .es | whois.nic.es | ⚠️ Requires IP-based authentication — always returns `unknown`. Availability check skipped; users directed to name.com. |
 
 ---
 
@@ -141,7 +148,7 @@ No RDAP available. Routed through the worker's WHOIS proxy.
 
 ## The `rdap_url()` Canonical Function
 
-Copy this function **verbatim** into all 3 SKILL.md templates (Step 3b, Track B, Step 7d). Do not modify the URL patterns or case labels without also updating this file.
+Copy this function **verbatim** into all 4 SKILL.md templates. Do not modify the URL patterns or case labels without also updating this file.
 
 ```bash
 rdap_url() {
@@ -177,8 +184,10 @@ rdap_url() {
     in) echo "https://rdap.nixiregistry.in/rdap/domain/${domain}" ;;
     re) echo "https://rdap.nic.re/domain/${domain}" ;;
     no) echo "https://rdap.norid.no/domain/${domain}" ;;
+    # --- Unreliable WHOIS: skip availability check ---
+    es) echo "SKIP" ;;
     # --- No RDAP: route through worker WHOIS proxy ---
-    co|it|de|be|at|se|gg|st|pt|my|nu|am|es) echo "WHOIS" ;;
+    co|it|de|be|at|se|gg|st|pt|my|nu|am) echo "WHOIS" ;;
     # --- Unknown TLDs: rdap.org fallback ---
     *) echo "https://rdap.org/domain/${domain}" ;;
   esac
@@ -208,4 +217,4 @@ When adding a new TLD:
 1. **Check IANA bootstrap first** — `https://data.iana.org/rdap/dns.json` — if the TLD is listed, use that URL.
 2. **Not in IANA bootstrap?** Check if Identity Digital serves it (`rdap.identitydigital.services`). Mark it ⚠️ unofficial if so.
 3. **No RDAP at all?** Add to the WHOIS proxy whitelist in the worker and add a `WHOIS` case to `rdap_url()`.
-4. Update this file, `tld-catalog.md`, and all 3 SKILL.md templates (Step 3b, Track B, Step 7d) in sync.
+4. Update this file, `tld-catalog.md`, and all 4 SKILL.md templates in sync.

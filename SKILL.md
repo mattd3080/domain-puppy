@@ -117,7 +117,8 @@ rdap_url() {
     in) echo "https://rdap.nixiregistry.in/rdap/domain/${domain}" ;;
     re) echo "https://rdap.nic.re/domain/${domain}" ;;
     no) echo "https://rdap.norid.no/domain/${domain}" ;;
-    co|it|de|be|at|se|gg|st|pt|my|nu|am|es) echo "WHOIS" ;;
+    es) echo "SKIP" ;;  # whois.nic.es requires IP auth — always returns unknown
+    co|it|de|be|at|se|gg|st|pt|my|nu|am) echo "WHOIS" ;;
     *) echo "https://rdap.org/domain/${domain}" ;;
   esac
 }
@@ -126,7 +127,10 @@ check_domain() {
   local domain="$1" outfile="$2"
   local url
   url=$(rdap_url "$domain")
-  if [ "$url" = "WHOIS" ]; then
+  if [ "$url" = "SKIP" ]; then
+    echo "SKIP" > "$outfile"
+    return
+  elif [ "$url" = "WHOIS" ]; then
     local result resp_status
     result=$(curl -s --max-time 10 -X POST \
       -H "Content-Type: application/json" \
@@ -172,6 +176,7 @@ For each domain checked (after retry), classify it as one of three states:
 |-------------|---------------|--------|
 | 404 | Available | ✅ |
 | 200 | Taken | ❌ |
+| SKIP | Unreliable TLD (.es) | ❓ |
 | Anything else (000, 429, timeout, 5xx, etc.) | Couldn't check | ❓ |
 
 ### 3e. Build the Affiliate Links
@@ -199,6 +204,8 @@ For each domain, determine the correct registrar using the routing table below, 
 - **Couldn't check** → Manual check link using the correct registrar from the table above
 
 - **Non-registrable TLDs (.er, .al)** → If a domain hack using `.er` or `.al` shows as available, display it but replace the buy link with: "Registration requires a specialty registrar — search for '.er domain registration' for options."
+
+- **Unreliable WHOIS: .es** → The `.es` WHOIS server (whois.nic.es) requires IP-based authentication, so our availability checks can't get a definitive answer. For any `.es` domain, skip the availability check entirely and instead show: `❓ {domain} — .es availability can't be checked automatically. [Check on name.com →](https://www.name.com/domain/search/{domain})`
 
 ---
 
@@ -355,7 +362,8 @@ rdap_url() {
     in) echo "https://rdap.nixiregistry.in/rdap/domain/${domain}" ;;
     re) echo "https://rdap.nic.re/domain/${domain}" ;;
     no) echo "https://rdap.norid.no/domain/${domain}" ;;
-    co|it|de|be|at|se|gg|st|pt|my|nu|am|es) echo "WHOIS" ;;
+    es) echo "SKIP" ;;  # whois.nic.es requires IP auth — always returns unknown
+    co|it|de|be|at|se|gg|st|pt|my|nu|am) echo "WHOIS" ;;
     *) echo "https://rdap.org/domain/${domain}" ;;
   esac
 }
@@ -364,7 +372,10 @@ check_domain() {
   local domain="$1" outfile="$2"
   local url
   url=$(rdap_url "$domain")
-  if [ "$url" = "WHOIS" ]; then
+  if [ "$url" = "SKIP" ]; then
+    echo "SKIP" > "$outfile"
+    return
+  elif [ "$url" = "WHOIS" ]; then
     local result resp_status
     result=$(curl -s --max-time 10 -X POST \
       -H "Content-Type: application/json" \
@@ -656,7 +667,8 @@ rdap_url() {
     in) echo "https://rdap.nixiregistry.in/rdap/domain/${domain}" ;;
     re) echo "https://rdap.nic.re/domain/${domain}" ;;
     no) echo "https://rdap.norid.no/domain/${domain}" ;;
-    co|it|de|be|at|se|gg|st|pt|my|nu|am|es) echo "WHOIS" ;;
+    es) echo "SKIP" ;;  # whois.nic.es requires IP auth — always returns unknown
+    co|it|de|be|at|se|gg|st|pt|my|nu|am) echo "WHOIS" ;;
     *) echo "https://rdap.org/domain/${domain}" ;;
   esac
 }
@@ -665,7 +677,10 @@ check_domain() {
   local domain="$1" outfile="$2"
   local url
   url=$(rdap_url "$domain")
-  if [ "$url" = "WHOIS" ]; then
+  if [ "$url" = "SKIP" ]; then
+    echo "SKIP" > "$outfile"
+    return
+  elif [ "$url" = "WHOIS" ]; then
     local result resp_status
     result=$(curl -s --max-time 10 -X POST \
       -H "Content-Type: application/json" \
