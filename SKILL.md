@@ -1,7 +1,7 @@
 ---
 name: domain-puppy
 description: This skill should be used when the user asks to "check if a domain is available", "find a domain name", "brainstorm domain names", "is X.com taken", "search for domains", or is trying to name a product, app, or startup and needs domain options. Also activate when the user mentions needing a domain or asks about aftermarket domains listed for sale.
-version: 1.6.1
+version: 1.6.2
 allowed-tools: Bash
 metadata: {"openclaw": {"requires": {"bins": ["curl"]}, "homepage": "https://github.com/mattd3080/domain-puppy"}}
 ---
@@ -17,7 +17,7 @@ You are Domain Puppy, a helpful domain-hunting assistant. Follow these instructi
 On first activation in a session, check if a newer version is available. Do not block or delay the user's request — run this in the background alongside Step 1.
 
 ```bash
-LOCAL_VERSION="1.6.1"
+LOCAL_VERSION="1.6.2"
 REMOTE_VERSION=$(curl -s --max-time 3 "https://raw.githubusercontent.com/mattd3080/domain-puppy/main/SKILL.md" | grep '^version:' | head -1 | awk '{print $2}')
 if ! printf '%s' "$REMOTE_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then REMOTE_VERSION=""; fi
 version_gt() {
@@ -132,7 +132,7 @@ Check the single domain determined in Step 3a. The following is a template using
 TMPFILE=$(mktemp)
 trap 'rm -f "$TMPFILE"' EXIT
 
-# --- Domain availability routing (v1.6.1) ---
+# --- Domain availability routing (v1.6.2) ---
 rdap_url() {
   local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   local tld="${domain##*.}"
@@ -381,7 +381,7 @@ Always verify a ccTLD exists and accepts registrations before suggesting it.
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
-# --- Domain availability routing (v1.6.1) ---
+# --- Domain availability routing (v1.6.2) ---
 rdap_url() {
   local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   local tld="${domain##*.}"
@@ -690,7 +690,7 @@ For each name:
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
-# --- Domain availability routing (v1.6.1) ---
+# --- Domain availability routing (v1.6.2) ---
 rdap_url() {
   local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   local tld="${domain##*.}"
@@ -884,17 +884,19 @@ Offer premium search **only** when ALL of the following are true:
 - The RDAP check confirmed the domain is **taken** (HTTP 200)
 - The user is in Flow 1 (Step 3), not brainstorm mode (Step 7)
 
-Never trigger premium search automatically. Always ask first.
+Do not trigger premium search in brainstorm mode — only for explicitly requested domains.
 
 ---
 
-### The Offer
+### Running Premium Checks
 
-Before running a premium check, always ask for consent and display remaining quota:
+**If the user explicitly asks** to check the aftermarket (e.g., "check aftermarket", "is it for sale", "yeah check it"), just run the check immediately — do not ask for confirmation. The user already gave intent.
 
-> "I can check if this domain is available for purchase on the aftermarket. This uses one of your premium searches (X of 5 remaining). Want me to check?"
+**If you are offering** a premium check proactively (e.g., after showing a domain is taken), briefly mention the quota and ask:
 
-Show the remaining check count as reported by the proxy. If quota is unknown (first check this session, user has their own key), omit the count.
+> This domain is taken, but it might be for sale on the aftermarket. Want me to check? (Premium search — X of 5 free checks remaining)
+
+**If the user is out of free checks** (0 remaining or previous 429), skip the premium check entirely and go straight to the Quota Exceeded Handler below — do not ask "want me to check?" when you already know it will fail.
 
 ---
 
