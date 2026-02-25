@@ -297,6 +297,117 @@ async function checkRateLimit(env, clientIP, maxPerMinute = 10) {
 }
 
 // ---------------------------------------------------------------------------
+// Analytics helpers
+// ---------------------------------------------------------------------------
+
+/** Returns current UTC date as "YYYY-MM-DD". */
+function getCurrentDay() {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(now.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Hashes an IP address with a salt using SHA-256, returning the first 12
+ * hex characters. Used to track unique users without storing raw IPs.
+ */
+async function hashIPForWindow(ip, salt) {
+  const input = `${ip}:${salt}`;
+  const encoded = new TextEncoder().encode(input);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  return hex.slice(0, 12);
+}
+
+/**
+ * Tracks a unique user in a KV-backed set for a given time window.
+ * Reads a JSON array, appends the hashedIP if not already present,
+ * and writes back with the given TTL. Fails silently on any error.
+ */
+async function trackUniqueUser(env, key, hashedIP, ttl) {
+  if (!env.QUOTA_KV) return;
+
+  try {
+    const raw = await env.QUOTA_KV.get(key);
+    const set = raw ? JSON.parse(raw) : [];
+    if (set.includes(hashedIP)) return;
+    set.push(hashedIP);
+    await env.QUOTA_KV.put(key, JSON.stringify(set), { expirationTtl: ttl });
+  } catch {
+    // KV failure — non-fatal
+  }
+}
+
+/**
+ * Increments an integer counter in KV.
+ * Reads the current value, increments by 1, and writes back.
+ * Pass null for ttl to write without an expiration. Fails silently on any error.
+ */
+async function incrementCounter(env, key, ttl) {
+  if (!env.QUOTA_KV) return;
+
+  try {
+    const raw = await env.QUOTA_KV.get(key);
+    const count = raw ? parseInt(raw, 10) : 0;
+    const options = ttl !== null ? { expirationTtl: ttl } : undefined;
+    await env.QUOTA_KV.put(key, String(count + 1), options);
+  } catch {
+    // KV failure — non-fatal
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Version check handler
+// ---------------------------------------------------------------------------
+
+/**
+ * Handles GET /v1/version.
+ * Returns the current skill version and records non-blocking analytics
+ * (DAU, MAU, monthly check count, all-time check count) via waitUntil.
+ */
+async function handleVersionCheck(request, env) {
+  const clientIP = getClientIP(request);
+
+  // Per-IP burst rate limit (30/min for version endpoint)
+  const { limited } = await checkRateLimit(env, clientIP, 30);
+  if (limited) {
+    return errorResponse(429, 'rate_limited', 'Too many requests. Please wait a moment.');
+  }
+
+  const day = getCurrentDay();
+  const month = getCurrentMonth();
+
+  const [dayHash, monthHash] = await Promise.all([
+    hashIPForWindow(clientIP, `dau:${day}`),
+    hashIPForWindow(clientIP, `mau:${month}`),
+  ]);
+
+  // Fire analytics in the background — does not block the response
+  const analyticsPromise = Promise.all([
+    trackUniqueUser(env, `version:dau:${day}`, dayHash, 3024000),   // 35d TTL
+    trackUniqueUser(env, `version:mau:${month}`, monthHash, 5184000), // 60d TTL
+    incrementCounter(env, `version:checks:${month}`, 5184000),       // monthly total
+    incrementCounter(env, 'version:total', null),                    // all-time
+  ]);
+
+  if (env.ctx) {
+    env.ctx.waitUntil(analyticsPromise);
+  }
+
+  // Return version without CORS headers and with no-store cache control
+  return new Response(JSON.stringify({ version: env.SKILL_VERSION }), {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // WHOIS availability checking (Layer 2 — 13 ccTLDs without RDAP)
 // ---------------------------------------------------------------------------
 
@@ -642,7 +753,7 @@ async function handlePremiumCheck(request, env) {
 // ---------------------------------------------------------------------------
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     // Handle OPTIONS preflight for all routes
@@ -651,6 +762,11 @@ export default {
     }
 
     try {
+      // Route: GET /v1/version
+      if (request.method === 'GET' && url.pathname === '/v1/version') {
+        return await handleVersionCheck(request, { ...env, ctx });
+      }
+
       // Route: POST /v1/premium-check
       if (request.method === 'POST' && url.pathname === '/v1/premium-check') {
         return await handlePremiumCheck(request, env);

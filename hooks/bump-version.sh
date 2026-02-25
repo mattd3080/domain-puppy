@@ -49,14 +49,22 @@ sed -i '' "s/LOCAL_VERSION=\"${OLD_VERSION}\"/LOCAL_VERSION=\"${NEW_VERSION}\"/g
 # 3. Comment headers: (vX.Y.Z)
 sed -i '' "s/(v${OLD_VERSION})/(v${NEW_VERSION})/g" "$SKILL"
 
+# 4. Worker env var: SKILL_VERSION in wrangler.toml
+WRANGLER="worker/wrangler.toml"
+if [ -f "$WRANGLER" ]; then
+  sed -i '' "s/SKILL_VERSION = \"${OLD_VERSION}\"/SKILL_VERSION = \"${NEW_VERSION}\"/" "$WRANGLER"
+fi
+
 # Verify
 FRONT=$(grep '^version:' "$SKILL" | head -1 | awk '{print $2}')
 LOCAL=$(grep 'LOCAL_VERSION=' "$SKILL" | head -1 | sed 's/.*LOCAL_VERSION="\([^"]*\)".*/\1/')
+WRANGLER_VER=$(grep 'SKILL_VERSION' worker/wrangler.toml 2>/dev/null | sed 's/.*"\([^"]*\)".*/\1/')
 
-if [ "$FRONT" != "$NEW_VERSION" ] || [ "$LOCAL" != "$NEW_VERSION" ]; then
+if [ "$FRONT" != "$NEW_VERSION" ] || [ "$LOCAL" != "$NEW_VERSION" ] || [ "$WRANGLER_VER" != "$NEW_VERSION" ]; then
   echo "ERROR: Version mismatch after update. Check SKILL.md manually."
   echo "  frontmatter: $FRONT"
   echo "  LOCAL_VERSION: $LOCAL"
+  echo "  wrangler.toml:   $WRANGLER_VER"
   exit 1
 fi
 
@@ -64,5 +72,6 @@ echo "Bumped $OLD_VERSION -> $NEW_VERSION"
 echo "  frontmatter:    $NEW_VERSION"
 echo "  LOCAL_VERSION:   $NEW_VERSION"
 echo "  comment headers: $NEW_VERSION"
+echo "  wrangler.toml:   $NEW_VERSION"
 echo ""
-echo "Next: git add SKILL.md && git commit"
+echo "Next: git add SKILL.md worker/wrangler.toml && git commit"
