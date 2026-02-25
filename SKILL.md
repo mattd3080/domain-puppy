@@ -1,7 +1,7 @@
 ---
 name: domain-puppy
 description: This skill should be used when the user asks to "check if a domain is available", "find a domain name", "brainstorm domain names", "is X.com taken", "search for domains", or is trying to name a product, app, or startup and needs domain options. Also activate when the user mentions needing a domain or asks about aftermarket domains listed for sale.
-version: 1.5.0
+version: 1.5.1
 allowed-tools: Bash
 metadata: {"openclaw": {"requires": {"bins": ["curl"]}, "homepage": "https://github.com/mattd3080/domain-puppy"}}
 ---
@@ -17,9 +17,13 @@ You are Domain Puppy, a helpful domain-hunting assistant. Follow these instructi
 On first activation in a session, check if a newer version is available. Do not block or delay the user's request — run this in the background alongside Step 1.
 
 ```bash
-LOCAL_VERSION="1.5.0"
+LOCAL_VERSION="1.5.1"
 REMOTE_VERSION=$(curl -s --max-time 3 "https://raw.githubusercontent.com/mattd3080/domain-puppy/main/SKILL.md" | grep '^version:' | head -1 | awk '{print $2}')
-if [ -n "$REMOTE_VERSION" ] && [ "$LOCAL_VERSION" != "$REMOTE_VERSION" ]; then
+if ! printf '%s' "$REMOTE_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then REMOTE_VERSION=""; fi
+version_gt() {
+  [ "$(printf '%s\n%s' "$1" "$2" | sort -V | tail -1)" = "$1" ] && [ "$1" != "$2" ]
+}
+if [ -n "$REMOTE_VERSION" ] && version_gt "$REMOTE_VERSION" "$LOCAL_VERSION"; then
   echo "update_available=true local=$LOCAL_VERSION remote=$REMOTE_VERSION"
 else
   echo "up_to_date=true version=$LOCAL_VERSION"
@@ -29,14 +33,51 @@ fi
 (npx --no-install playwright --version 2>/dev/null || playwright --version 2>/dev/null) && echo "playwright_available=true" || echo "playwright_available=false"
 ```
 
-- If versions match or the curl fails: do nothing.
-- If a newer version is available: after presenting the current results, append a one-liner:
+### If versions match or the curl fails
 
-  > Domain Puppy v{REMOTE_VERSION} is available — run `npx skills add mattd3080/domain-puppy` to update.
+Do nothing. Proceed normally.
 
-Do not repeat this notice more than once per session.
+### If a newer version is available
 
-- **Playwright detection:** If the output includes `playwright_available=true`, remember this silently. Do not mention Playwright to the user. This flag is only used later in Step 8 (quota handler) and Step 10 (browser-based price check). If `playwright_available=false`, do nothing — premium search works normally via the API.
+Set a session flag: `update_available=true`. This flag persists for the entire session and drives the behavior below.
+
+**First message (on activation):** Before answering the user's request, show this prominently:
+
+> **Domain Puppy v{REMOTE_VERSION} is available** (you're on v{LOCAL_VERSION}). Want to update? Just say "yes" and I'll handle it.
+
+Then proceed to answer the user's request normally.
+
+**Every subsequent message while `update_available=true`:** After presenting results, append a brief nudge. Vary the wording to avoid feeling robotic — rotate through lines like:
+
+- > Reminder: Domain Puppy v{REMOTE_VERSION} is available. Say "update" to install.
+- > You're still on v{LOCAL_VERSION} — say "update" to get the latest.
+- > Quick note: a newer version of Domain Puppy is ready. Just say "update".
+
+Keep these short (one line) and always at the end of the response, after the actual results. Never let the nudge interrupt the user's workflow.
+
+**When the user says "yes", "update", "upgrade", or similar:** Run the update:
+
+```bash
+npx skills add mattd3080/domain-puppy
+```
+
+This is the same trusted install command from the official GitHub repo that the user already ran to install Domain Puppy in the first place. It uses the `skills` CLI which fetches from GitHub (not npm) and overwrites the local SKILL.md with the latest version. No additional packages are installed, no post-install scripts run, and the source is the same public repo the user originally trusted.
+
+After the command completes, confirm:
+
+> Updated to Domain Puppy v{REMOTE_VERSION}. You're all set.
+
+Then clear the `update_available` flag for the rest of the session. Stop showing nudges.
+
+**If the update command fails:** Show the error and offer the manual path:
+
+> Update failed — you can update manually by running: `npx skills add mattd3080/domain-puppy`
+
+Do not retry automatically.
+
+### Playwright detection
+
+If the output includes `playwright_available=true`, remember this silently. Do not mention Playwright to the user. This flag is only used later in Step 8 (quota handler) and Step 10 (browser-based price check). If `playwright_available=false`, do nothing — premium search works normally via the API.
 
 ---
 
@@ -93,8 +134,9 @@ Check the single domain determined in Step 3a. The following is a template using
 
 ```bash
 TMPFILE=$(mktemp)
+trap 'rm -f "$TMPFILE"' EXIT
 
-# --- Domain availability routing (v1.5.0) ---
+# --- Domain availability routing (v1.5.1) ---
 rdap_url() {
   local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   local tld="${domain##*.}"
@@ -137,11 +179,12 @@ check_domain() {
     return
   elif [ "$url" = "WHOIS" ]; then
     local result resp_status
-    local safe_domain
-    safe_domain=$(printf '%s' "$domain" | sed 's/["\]/\\&/g')
+    if ! printf '%s' "$domain" | grep -qE '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$'; then
+      echo "000" > "$outfile"; return
+    fi
     result=$(curl -s --max-time 10 -X POST \
       -H "Content-Type: application/json" \
-      -d "{\"domain\":\"$safe_domain\"}" \
+      -d "{\"domain\":\"$domain\"}" \
       https://domain-puppy-proxy.mattjdalley.workers.dev/v1/whois-check)
     case "$result" in
       *'"available"'*) resp_status="404" ;;
@@ -340,8 +383,9 @@ Always verify a ccTLD exists and accepts registrations before suggesting it.
 
 ```bash
 TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
 
-# --- Domain availability routing (v1.5.0) ---
+# --- Domain availability routing (v1.5.1) ---
 rdap_url() {
   local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   local tld="${domain##*.}"
@@ -384,11 +428,12 @@ check_domain() {
     return
   elif [ "$url" = "WHOIS" ]; then
     local result resp_status
-    local safe_domain
-    safe_domain=$(printf '%s' "$domain" | sed 's/["\]/\\&/g')
+    if ! printf '%s' "$domain" | grep -qE '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$'; then
+      echo "000" > "$outfile"; return
+    fi
     result=$(curl -s --max-time 10 -X POST \
       -H "Content-Type: application/json" \
-      -d "{\"domain\":\"$safe_domain\"}" \
+      -d "{\"domain\":\"$domain\"}" \
       https://domain-puppy-proxy.mattjdalley.workers.dev/v1/whois-check)
     case "$result" in
       *'"available"'*) resp_status="404" ;;
@@ -647,8 +692,9 @@ For each name:
 
 ```bash
 TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
 
-# --- Domain availability routing (v1.5.0) ---
+# --- Domain availability routing (v1.5.1) ---
 rdap_url() {
   local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   local tld="${domain##*.}"
@@ -691,11 +737,12 @@ check_domain() {
     return
   elif [ "$url" = "WHOIS" ]; then
     local result resp_status
-    local safe_domain
-    safe_domain=$(printf '%s' "$domain" | sed 's/["\]/\\&/g')
+    if ! printf '%s' "$domain" | grep -qE '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$'; then
+      echo "000" > "$outfile"; return
+    fi
     result=$(curl -s --max-time 10 -X POST \
       -H "Content-Type: application/json" \
-      -d "{\"domain\":\"$safe_domain\"}" \
+      -d "{\"domain\":\"$domain\"}" \
       https://domain-puppy-proxy.mattjdalley.workers.dev/v1/whois-check)
     case "$result" in
       *'"available"'*) resp_status="404" ;;
@@ -863,11 +910,11 @@ Has the user configured their own Fastly API token?
 
 ├── YES → Call Fastly Domain Research API directly with their token (unlimited checks)
 │
-│   FASTLY_TOKEN=$(grep -o '"fastlyApiToken":"[^"]*"' "$HOME/.claude/domain-puppy/config.json" 2>/dev/null | cut -d'"' -f4)
+│   FASTLY_TOKEN=$(grep -oE '"fastlyApiToken"[[:space:]]*:[[:space:]]*"[^"]*"' "$HOME/.claude/domain-puppy/config.json" 2>/dev/null | cut -d'"' -f4)
 │
 │   # Replace DOMAIN with the actual domain being checked (e.g., brainstorm.com)
 │   PREMIUM_RESULT=$(curl -s --max-time 10 \
-│     -H "Fastly-Key: $FASTLY_TOKEN" \
+│     --config <(printf 'header = "Fastly-Key: %s"\n' "$FASTLY_TOKEN") \
 │     "https://api.domainr.com/v2/status?domain=DOMAIN")
 │
 │   On 401/403: "Your Fastly API token returned an error — it may have expired
@@ -1041,10 +1088,10 @@ When the user says they want to add their Fastly API token (e.g., "I want to use
 3. **Verify with a test API call:**
 
    ```bash
-   FASTLY_TOKEN=$(grep -o '"fastlyApiToken":"[^"]*"' "$HOME/.claude/domain-puppy/config.json" 2>/dev/null | cut -d'"' -f4)
+   FASTLY_TOKEN=$(grep -oE '"fastlyApiToken"[[:space:]]*:[[:space:]]*"[^"]*"' "$HOME/.claude/domain-puppy/config.json" 2>/dev/null | cut -d'"' -f4)
 
    TEST_RESULT=$(curl -s --max-time 10 \
-     -H "Fastly-Key: $FASTLY_TOKEN" \
+     --config <(printf 'header = "Fastly-Key: %s"\n' "$FASTLY_TOKEN") \
      "https://api.domainr.com/v2/status?domain=example.com")
    ```
 
@@ -1063,7 +1110,7 @@ At the start of any premium check, read the config file to determine whether to 
 ```bash
 FASTLY_TOKEN=""
 if [ -f ~/.claude/domain-puppy/config.json ]; then
-  FASTLY_TOKEN=$(grep -o '"fastlyApiToken":"[^"]*"' "$HOME/.claude/domain-puppy/config.json" 2>/dev/null | cut -d'"' -f4)
+  FASTLY_TOKEN=$(grep -oE '"fastlyApiToken"[[:space:]]*:[[:space:]]*"[^"]*"' "$HOME/.claude/domain-puppy/config.json" 2>/dev/null | cut -d'"' -f4)
 fi
 
 if [ -n "$FASTLY_TOKEN" ]; then
@@ -1079,7 +1126,21 @@ Use `grep` + `cut` for JSON parsing — do not assume `jq` or `python3` is insta
 
 ## Step 10: Browser-Based Price Check (Playwright Fallback)
 
-This step is triggered only from the Quota Exceeded Handler in Step 8 when the user chooses "Check the registrar directly" and Playwright was detected in Step 0. It scrapes the registrar's domain search page to extract pricing.
+This step is triggered only from the Quota Exceeded Handler in Step 8 when the user chooses "Check the registrar directly" and Playwright was detected in Step 0. It uses the user's local Playwright installation to visit a registrar's public domain search page and extract pricing.
+
+**Important:** This step runs entirely on the user's machine using their local browser. Domain Puppy provides the automation script; the user initiates the request. This is a client-side tool, not a hosted service.
+
+---
+
+### Disclosure & Consent
+
+Before running Step 10 for the **first time in a session**, display this disclosure and wait for the user to confirm:
+
+> **Browser price check:** This will use Playwright on your machine to visit {registrar}'s domain search page (`{url}`) and extract pricing. By proceeding, you acknowledge that this is an automated visit to a third-party website and you are responsible for compliance with their terms of service.
+>
+> Continue? (y/n)
+
+If the user declines, fall through to the manual link handler immediately. If the user confirms, remember their consent for the rest of the session — do not re-prompt on subsequent Step 10 invocations.
 
 ---
 
@@ -1088,7 +1149,8 @@ This step is triggered only from the Quota Exceeded Handler in Step 8 when the u
 - The user has exhausted their 5 free premium checks (429 from proxy)
 - Playwright was detected in Step 0 (`playwright_available=true`)
 - The user chose option 1 ("Check the registrar directly") from the quota handler
-- OR: the user previously chose option 1 this session and another premium check hit the quota (auto-use via session memory)
+- The user has confirmed the disclosure above (or previously confirmed this session)
+- OR: the user previously chose option 1 this session and another premium check hit the quota (auto-use via session memory, but only if disclosure was already confirmed)
 
 Never trigger Step 10 for any other reason. It is not a replacement for the premium API — it is a fallback.
 
@@ -1111,7 +1173,8 @@ Determine which registrar to scrape based on TLD:
 Write a short Node.js script to a temp file, run it, and clean up. The script is a **static template** — no user-supplied data is interpolated into the script source. The domain is passed exclusively as a CLI argument (`process.argv[2]`).
 
 ```bash
-TMPSCRIPT=$(mktemp /tmp/domain-puppy-scrape-XXXXXX.cjs)
+TMPSCRIPT=$(mktemp "${TMPDIR:-/tmp}/domain-puppy-scrape-XXXXXX.cjs")
+chmod 600 "$TMPSCRIPT"
 trap 'rm -f "$TMPSCRIPT"' EXIT
 
 cat > "$TMPSCRIPT" << 'SCRAPE_EOF'

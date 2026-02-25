@@ -116,16 +116,20 @@ Additional details:
 /domain (Claude Code skill)
     |
     +-- Free checks:  curl → RDAP endpoints (parallel)
-    |                 whois / dig → fallback for ccTLDs
+    |                 Cloudflare Worker → WHOIS (13 ccTLDs without RDAP)
     |
     +-- Premium:      Cloudflare Worker proxy → Fastly Domain Research API
-                      (or direct to Fastly API with your own key)
+    |                 (or direct to Fastly API with your own key)
+    |
+    +-- Fallback:     Playwright → registrar pricing pages (when API quota exhausted)
 ```
 
 1. The skill file runs entirely within Claude Code — no daemon, no background process
 2. Free availability checks hit RDAP servers directly from your machine
-3. Premium aftermarket search routes through a Cloudflare Worker that manages the shared quota and forwards requests to Fastly
-4. If you supply your own Fastly API token, premium searches skip the proxy entirely
+3. For 13 ccTLDs without RDAP support, the skill routes WHOIS checks through the Cloudflare Worker proxy
+4. Premium aftermarket search routes through a Cloudflare Worker that manages the shared quota and forwards requests to Fastly
+5. If you supply your own Fastly API token, premium searches skip the proxy entirely
+6. When the free premium quota is exhausted and Playwright is installed, the skill can scrape registrar pricing pages directly as a fallback
 
 ---
 
@@ -133,9 +137,12 @@ Additional details:
 
 The Cloudflare Worker proxy (`worker/src/index.js`) sits between free-tier users and the Fastly Domain Research API. It protects against runaway usage and abuse.
 
-### Deployed Endpoint
+### Deployed Endpoints
 
-`https://domain-puppy-proxy.mattjdalley.workers.dev/v1/premium-check`
+- `POST /v1/premium-check` — Premium domain status via Fastly/Domainr (IP-quota limited)
+- `POST /v1/whois-check` — WHOIS availability for 13 ccTLDs without RDAP support
+
+Base URL: `https://domain-puppy-proxy.mattjdalley.workers.dev`
 
 ### Protection Layers
 
@@ -187,6 +194,23 @@ All guards use Cloudflare KV for state and **fail open** — if KV is unavailabl
 
 ---
 
+## Releasing a New Version
+
+Domain Puppy auto-prompts users to update when a new version is pushed to main. To release:
+
+```bash
+./hooks/bump-version.sh 1.6.0    # updates all version strings in SKILL.md
+git add SKILL.md
+git commit -m "Release v1.6.0"
+git push
+```
+
+The bump script updates the version in all three locations within SKILL.md (frontmatter, `LOCAL_VERSION`, and comment headers) in one command. The pre-commit hook will block the commit if any of them are out of sync.
+
+Users on older versions will see a persistent update prompt until they say "update", which runs `npx skills add mattd3080/domain-puppy` to pull the latest.
+
+---
+
 ## Self-Hosting the Worker
 
 Contributors and teams who want to run their own proxy can deploy the Cloudflare Worker:
@@ -200,7 +224,7 @@ wrangler secret put FASTLY_API_TOKEN
 wrangler deploy
 ```
 
-Then find and replace `https://domain-puppy-proxy.mattjdalley.workers.dev/v1/premium-check` in `skills/domain/SKILL.md` with your deployed worker URL.
+Then find and replace `https://domain-puppy-proxy.mattjdalley.workers.dev/v1/premium-check` in `SKILL.md` with your deployed worker URL.
 
 ### Secret leak prevention
 

@@ -23,3 +23,22 @@ Thumbs.db
 
 # Internal docs (keep out of public repo)
 internal/
+
+# QA reports
+report/
+
+# Agent configs
+.agents/
+.agent/
+
+# Claude config
+.claude/
+
+# Other editors
+.windsurf/
+
+# Skills lock (local only)
+skills-lock.json
+
+# Python cache
+.ruff_cache/

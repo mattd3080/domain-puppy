@@ -268,6 +268,35 @@ async function sendBreakerAlert(env, month, count, limit) {
 
 
 // ---------------------------------------------------------------------------
+// Per-IP burst rate limiter
+// ---------------------------------------------------------------------------
+
+/**
+ * Checks whether a client IP has exceeded the per-minute burst rate limit.
+ *
+ * KV key: ratelimit:{clientIP}:{minute}
+ * TTL: 120 seconds (covers the current minute plus one).
+ *
+ * Returns { limited: bool }.
+ * Fails open if KV is unavailable.
+ */
+async function checkRateLimit(env, clientIP, maxPerMinute = 10) {
+  if (!env.QUOTA_KV) return { limited: false };
+
+  try {
+    const minute = Math.floor(Date.now() / 60000);
+    const key = `ratelimit:${clientIP}:${minute}`;
+    const raw = await env.QUOTA_KV.get(key);
+    const count = raw ? parseInt(raw, 10) : 0;
+    if (count >= maxPerMinute) return { limited: true };
+    await env.QUOTA_KV.put(key, String(count + 1), { expirationTtl: 120 });
+    return { limited: false };
+  } catch {
+    return { limited: false }; // fail open
+  }
+}
+
+// ---------------------------------------------------------------------------
 // WHOIS availability checking (Layer 2 — 13 ccTLDs without RDAP)
 // ---------------------------------------------------------------------------
 
@@ -431,8 +460,12 @@ async function whoisLookup(domain, server) {
 }
 
 async function handleWhoisCheck(request, env) {
-  // No rate limiting — WHOIS servers handle their own rate limits,
-  // and this endpoint has no paid API costs to protect.
+  // Per-IP burst rate limit (protects against abuse even though WHOIS has no API cost)
+  const clientIP = getClientIP(request);
+  const { limited } = await checkRateLimit(env, clientIP);
+  if (limited) {
+    return errorResponse(429, 'rate_limited', 'Too many requests. Please wait a moment.');
+  }
 
   // Enforce Content-Type
   const contentType = request.headers.get('Content-Type') || '';
@@ -489,6 +522,12 @@ async function handlePremiumCheck(request, env) {
 
   // Extract client IP first — needed for quota and rate limit checks
   const clientIP = getClientIP(request);
+
+  // --- Per-IP burst rate limit ---
+  const { limited } = await checkRateLimit(env, clientIP);
+  if (limited) {
+    return errorResponse(429, 'rate_limited', 'Too many requests. Please wait a moment.');
+  }
 
   // --- Global circuit breaker check ---
   const { open } = await checkCircuitBreaker(env, monthlyQuotaLimit);

@@ -42,7 +42,7 @@ if [ -n "$STAGED_FILES" ]; then
   while IFS= read -r pattern; do
     [ -z "$pattern" ] && continue
     # Search staged content (not working tree) for the pattern
-    if git diff --cached -- $STAGED_FILES | grep -qE "^\+.*$pattern"; then
+    if git diff --cached --diff-filter=ACM | grep -qE "^\+.*$pattern"; then
       echo "ERROR: Possible secret detected in staged changes (pattern: $pattern)"
       ERRORS=1
     fi
@@ -50,10 +50,27 @@ if [ -n "$STAGED_FILES" ]; then
   rm -f "$PATTERNFILE"
 fi
 
+# ---------------------------------------------------------------------------
+# Version sync check — ensure SKILL.md versions match
+# ---------------------------------------------------------------------------
+
+if git diff --cached --name-only | grep -qF "SKILL.md"; then
+  FRONT_VER=$(git show :SKILL.md | grep '^version:' | head -1 | awk '{print $2}')
+  LOCAL_VER=$(git show :SKILL.md | grep 'LOCAL_VERSION=' | head -1 | sed 's/.*LOCAL_VERSION="\([^"]*\)".*/\1/')
+
+  if [ -n "$FRONT_VER" ] && [ -n "$LOCAL_VER" ] && [ "$FRONT_VER" != "$LOCAL_VER" ]; then
+    echo "ERROR: Version mismatch in SKILL.md"
+    echo "  frontmatter version: $FRONT_VER"
+    echo "  LOCAL_VERSION:       $LOCAL_VER"
+    echo ""
+    echo "Run: ./hooks/bump-version.sh $FRONT_VER"
+    ERRORS=1
+  fi
+fi
+
 if [ "$ERRORS" -ne 0 ]; then
   echo ""
-  echo "Commit blocked. Remove secrets before committing."
-  echo "If this is a false positive, review the flagged lines carefully."
+  echo "Commit blocked. Fix the issues above before committing."
   exit 1
 fi
 
