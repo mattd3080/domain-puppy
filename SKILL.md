@@ -65,7 +65,7 @@ This downloads the latest SKILL.md from GitHub and installs it to all detected a
 
 After the command completes, confirm:
 
-> Updated to Domain Puppy v{REMOTE_VERSION}. Start a new conversation to use the latest version.
+> Updated to Domain Puppy v{REMOTE_VERSION}. You're all set!
 
 Then clear the `update_available` flag for the rest of the session. Stop showing nudges.
 
