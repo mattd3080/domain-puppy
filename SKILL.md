@@ -1,7 +1,7 @@
 ---
 name: domain-puppy
 description: This skill should be used when the user asks to "check if a domain is available", "find a domain name", "brainstorm domain names", "is X.com taken", "search for domains", or is trying to name a product, app, or startup and needs domain options. Also activate when the user mentions needing a domain or asks about aftermarket domains listed for sale.
-version: 1.6.0
+version: 1.6.1
 allowed-tools: Bash
 metadata: {"openclaw": {"requires": {"bins": ["curl"]}, "homepage": "https://github.com/mattd3080/domain-puppy"}}
 ---
@@ -17,7 +17,7 @@ You are Domain Puppy, a helpful domain-hunting assistant. Follow these instructi
 On first activation in a session, check if a newer version is available. Do not block or delay the user's request — run this in the background alongside Step 1.
 
 ```bash
-LOCAL_VERSION="1.6.0"
+LOCAL_VERSION="1.6.1"
 REMOTE_VERSION=$(curl -s --max-time 3 "https://raw.githubusercontent.com/mattd3080/domain-puppy/main/SKILL.md" | grep '^version:' | head -1 | awk '{print $2}')
 if ! printf '%s' "$REMOTE_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then REMOTE_VERSION=""; fi
 version_gt() {
@@ -28,9 +28,6 @@ if [ -n "$REMOTE_VERSION" ] && version_gt "$REMOTE_VERSION" "$LOCAL_VERSION"; th
 else
   echo "up_to_date=true version=$LOCAL_VERSION"
 fi
-
-# Playwright detection (silent — used only if premium quota runs out)
-(npx --no-install playwright --version 2>/dev/null || playwright --version 2>/dev/null) && echo "playwright_available=true" || echo "playwright_available=false"
 ```
 
 ### If versions match or the curl fails
@@ -77,10 +74,6 @@ Then clear the `update_available` flag for the rest of the session. Stop showing
 > ```
 
 Do not retry automatically.
-
-### Playwright detection
-
-If the output includes `playwright_available=true`, remember this silently. Do not mention Playwright to the user. This flag is only used later in Step 8 (quota handler) and Step 10 (browser-based price check). If `playwright_available=false`, do nothing — premium search works normally via the API.
 
 ---
 
@@ -139,7 +132,7 @@ Check the single domain determined in Step 3a. The following is a template using
 TMPFILE=$(mktemp)
 trap 'rm -f "$TMPFILE"' EXIT
 
-# --- Domain availability routing (v1.6.0) ---
+# --- Domain availability routing (v1.6.1) ---
 rdap_url() {
   local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   local tld="${domain##*.}"
@@ -388,7 +381,7 @@ Always verify a ccTLD exists and accepts registrations before suggesting it.
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
-# --- Domain availability routing (v1.6.0) ---
+# --- Domain availability routing (v1.6.1) ---
 rdap_url() {
   local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   local tld="${domain##*.}"
@@ -697,7 +690,7 @@ For each name:
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
-# --- Domain availability routing (v1.6.0) ---
+# --- Domain availability routing (v1.6.1) ---
 rdap_url() {
   local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   local tld="${domain##*.}"
@@ -948,9 +941,15 @@ Always use `-s` on curl to suppress output that might contain the key. Never log
 
 ### Quota Exceeded Handler (429 Response)
 
-When the proxy returns 429, present a friendly message — no alarm language ("error", "exceeded", "limit"). The options depend on whether Playwright was detected in Step 0.
+When the proxy returns 429, first check if Playwright is available (this only runs when needed, not on every session):
 
-**If Playwright was detected (`playwright_available=true`):**
+```bash
+(npx --no-install playwright --version 2>/dev/null || playwright --version 2>/dev/null) && echo "playwright_available=true" || echo "playwright_available=false"
+```
+
+Present a friendly message — no alarm language ("error", "exceeded", "limit"). The options depend on the result above.
+
+**If Playwright is available:**
 
 > Your free premium searches for this month are used up. Here's what we can do:
 >
@@ -1131,7 +1130,7 @@ Use `grep` + `cut` for JSON parsing — do not assume `jq` or `python3` is insta
 
 ## Step 10: Browser-Based Price Check (Playwright Fallback)
 
-This step is triggered only from the Quota Exceeded Handler in Step 8 when the user chooses "Check the registrar directly" and Playwright was detected in Step 0. It uses the user's local Playwright installation to visit a registrar's public domain search page and extract pricing.
+This step is triggered only from the Quota Exceeded Handler in Step 8 when the user chooses the Playwright option and Playwright was confirmed available. It uses the user's local Playwright installation to visit a registrar's public domain search page and extract pricing.
 
 **Important:** This step runs entirely on the user's machine using their local browser. Domain Puppy provides the automation script; the user initiates the request. This is a client-side tool, not a hosted service.
 
@@ -1154,7 +1153,7 @@ If the user declines, fall through to the manual link handler immediately.
 ### When to Use
 
 - The user has exhausted their 5 free premium checks (429 from proxy)
-- Playwright was detected in Step 0 (`playwright_available=true`)
+- Playwright was confirmed available in the quota handler check
 - The user chose option 1 ("Check the registrar directly") from the quota handler
 - The user has confirmed the disclosure above (asked every time — never skip unless user granted blanket permission)
 
