@@ -954,7 +954,7 @@ When the proxy returns 429, present a friendly message — no alarm language ("e
 
 > Your free premium searches for this month are used up. Here's what we can do:
 >
-> 1. **Use Playwright** — I'll use Playwright on your machine to check the registrar's pricing page directly (takes a few seconds)
+> 1. **Your Playwright installation** — I noticed you have Playwright installed. You can use it to check the registrar's pricing page directly (takes a few seconds)
 > 2. **Set up your own API key** — unlimited premium checks, free to create
 > 3. **Check manually** — I'll open the registrar page in your browser
 >
@@ -969,7 +969,7 @@ When the proxy returns 429, present a friendly message — no alarm language ("e
 >
 > Which would you prefer?
 >
-> (Tip: If you have [Playwright](https://playwright.dev/) installed, I can also check registrar pricing pages directly.)
+> (Tip: If you install [Playwright](https://playwright.dev/), you can use it to check registrar pricing pages directly.)
 
 **After the user chooses (Playwright detected — 3-option menu):**
 
@@ -1141,7 +1141,7 @@ This step is triggered only from the Quota Exceeded Handler in Step 8 when the u
 
 **Every time** before running Step 10, display this disclosure and wait for the user to confirm:
 
-> **Browser price check:** This will use Playwright on your machine to visit {registrar}'s domain search page (`{url}`) and extract pricing. By proceeding, you acknowledge that this is an automated visit to a third-party website and you are responsible for compliance with their terms of service.
+> **Browser price check:** You're about to use your Playwright installation to visit {registrar}'s domain search page (`{url}`) and extract pricing. This is your browser automation tool running on your machine — Domain Puppy provides the script, you initiate the request. By proceeding, you acknowledge that this is an automated visit to a third-party website and you are responsible for compliance with their terms of service.
 >
 > Continue? (y/n)
 
