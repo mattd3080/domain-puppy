@@ -12,6 +12,7 @@ ERRORS=0
 SECRET_PATTERNS='
 FASTLY_API_TOKEN\s*=\s*[A-Za-z0-9_\-]{20,}
 CLOUDFLARE_API_TOKEN\s*=\s*[A-Za-z0-9_\-]{20,}
+CF_API_TOKEN\s*=\s*[A-Za-z0-9_\-]{20,}
 RAPIDAPI_KEY\s*=\s*[A-Za-z0-9_\-]{20,}
 ALERT_WEBHOOK\s*=\s*https?://[^\s]{10,}
 Authorization:\s*Bearer\s+[A-Za-z0-9_\-\.]{20,}
@@ -26,7 +27,7 @@ BLOCKED_FILES='.dev.vars .env credentials.json'
 
 # Check for blocked filenames in staged files
 for f in $BLOCKED_FILES; do
-  if git diff --cached --name-only | grep -qF "$f"; then
+  if git diff --cached --name-only | grep -qE "(^|/)$f$"; then
     echo "ERROR: Blocked file staged for commit: $f"
     ERRORS=1
   fi

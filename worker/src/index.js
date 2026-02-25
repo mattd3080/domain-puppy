@@ -8,10 +8,7 @@ import { connect } from 'cloudflare:sockets';
  * Security: FASTLY_API_TOKEN lives in Cloudflare secrets, never in responses.
  */
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+const RESPONSE_HEADERS = {
   'Content-Type': 'application/json',
 };
 
@@ -24,11 +21,14 @@ function isValidDomain(domain) {
   if (domain.length > 253) return false;
   const labels = domain.toLowerCase().split('.');
   if (labels.length < 2) return false;
-  return labels.every(label => {
+  if (!labels.every(label => {
     if (label.length === 0 || label.length > 63) return false;
     if (label.startsWith('-') || label.endsWith('-')) return false;
     return /^[a-z0-9-]+$/.test(label);
-  });
+  })) return false;
+  const tld = labels[labels.length - 1];
+  if (/^\d+$/.test(tld)) return false;
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,7 +103,7 @@ function parseDomainrResponse(data, requestedDomain) {
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: CORS_HEADERS,
+    headers: RESPONSE_HEADERS,
   });
 }
 
@@ -324,8 +324,9 @@ const WHOIS_QUERY_FORMATS = {
 };
 
 function buildWhoisQuery(domain, server) {
+  const safeDomain = domain.replace(/[^a-z0-9.-]/gi, '');
   const formatter = WHOIS_QUERY_FORMATS[server];
-  return formatter ? formatter(domain) : `${domain}\r\n`;
+  return formatter ? formatter(safeDomain) : `${safeDomain}\r\n`;
 }
 
 const WHOIS_PARSERS = {
@@ -442,8 +443,8 @@ async function whoisLookup(domain, server) {
 
         const { done, value } = result;
         if (done) break;
+        if (response.length + value.byteLength > MAX_WHOIS_RESPONSE) break; // Size guard
         response += new TextDecoder().decode(value);
-        if (response.length > MAX_WHOIS_RESPONSE) break; // Size guard
       }
     } finally {
       reader.releaseLock();
@@ -465,6 +466,12 @@ async function handleWhoisCheck(request, env) {
   const { limited } = await checkRateLimit(env, clientIP);
   if (limited) {
     return errorResponse(429, 'rate_limited', 'Too many requests. Please wait a moment.');
+  }
+
+  // Request body size limit
+  const contentLength = parseInt(request.headers.get('Content-Length') || '0', 10);
+  if (contentLength > 4096) {
+    return errorResponse(413, 'payload_too_large', 'Request body too large');
   }
 
   // Enforce Content-Type
@@ -539,6 +546,12 @@ async function handlePremiumCheck(request, env) {
   const { allowed, checksUsed } = await checkQuota(env, clientIP, freeChecksPerIP);
   if (!allowed) {
     return jsonResponse({ error: 'quota_exceeded', remainingChecks: 0 }, 429);
+  }
+
+  // Request body size limit
+  const contentLength = parseInt(request.headers.get('Content-Length') || '0', 10);
+  if (contentLength > 4096) {
+    return errorResponse(413, 'payload_too_large', 'Request body too large');
   }
 
   // Enforce Content-Type
@@ -632,9 +645,9 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // Handle CORS preflight for all routes
+    // Handle OPTIONS preflight for all routes
     if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: CORS_HEADERS });
+      return new Response(null, { status: 204, headers: {} });
     }
 
     try {

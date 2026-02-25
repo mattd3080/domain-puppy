@@ -1,7 +1,7 @@
 ---
 name: domain-puppy
 description: This skill should be used when the user asks to "check if a domain is available", "find a domain name", "brainstorm domain names", "is X.com taken", "search for domains", or is trying to name a product, app, or startup and needs domain options. Also activate when the user mentions needing a domain or asks about aftermarket domains listed for sale.
-version: 1.6.8
+version: 1.7.0
 allowed-tools: Bash
 metadata: {"openclaw": {"requires": {"bins": ["curl"]}, "homepage": "https://github.com/mattd3080/domain-puppy"}}
 ---
@@ -19,7 +19,7 @@ You are Domain Puppy, a helpful domain-hunting assistant. Follow these instructi
 On first activation in a session, check if a newer version is available. Do not block or delay the user's request — run this in the background alongside Step 1.
 
 ```bash
-LOCAL_VERSION="1.6.8"
+LOCAL_VERSION="1.7.0"
 REMOTE_VERSION=$(curl -s --max-time 3 "https://raw.githubusercontent.com/mattd3080/domain-puppy/main/SKILL.md" | grep '^version:' | head -1 | awk '{print $2}')
 if ! printf '%s' "$REMOTE_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then REMOTE_VERSION=""; fi
 version_gt() {
@@ -131,10 +131,11 @@ Use `curl` against the RDAP protocol to check the domain. RDAP returns:
 Check the single domain determined in Step 3a. The following is a template using `brainstorm.com` as an example — replace with the actual domain.
 
 ```bash
-TMPFILE=$(mktemp)
+TMPFILE=""
 trap 'rm -f "$TMPFILE"' EXIT
+TMPFILE=$(mktemp)
 
-# --- Domain availability routing (v1.6.8) ---
+# --- Domain availability routing (v1.7.0) ---
 rdap_url() {
   local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   local tld="${domain##*.}"
@@ -170,6 +171,9 @@ rdap_url() {
 
 check_domain() {
   local domain="$1" outfile="$2"
+  if ! printf '%s' "$domain" | grep -qE '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$'; then
+    echo "000" > "$outfile"; return
+  fi
   local url
   url=$(rdap_url "$domain")
   if [ "$url" = "SKIP" ]; then
@@ -177,9 +181,6 @@ check_domain() {
     return
   elif [ "$url" = "WHOIS" ]; then
     local result resp_status
-    if ! printf '%s' "$domain" | grep -qE '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$'; then
-      echo "000" > "$outfile"; return
-    fi
     result=$(curl -s --max-time 10 -X POST \
       -H "Content-Type: application/json" \
       -d "{\"domain\":\"$domain\"}" \
@@ -191,7 +192,7 @@ check_domain() {
     esac
     echo "$resp_status" > "$outfile"
   else
-    curl -s -o /dev/null -w "%{http_code}" -L --max-time 10 "$url" > "$outfile"
+    curl -s -o /dev/null -w "%{http_code}" -L --max-redirs 3 --proto '=https' --proto-redir '=https' --max-time 10 "$url" > "$outfile"
   fi
 }
 
@@ -199,13 +200,15 @@ check_domain() {
 check_domain "brainstorm.com" "$TMPFILE"
 
 # Read the result
-STATUS=$(cat "$TMPFILE")
+STATUS=$(cat "$TMPFILE" 2>/dev/null)
+[ -z "$STATUS" ] && STATUS="000"
 
 # Retry once if non-definitive (000 timeout, 429 rate limit, etc.)
 if [ "$STATUS" != "200" ] && [ "$STATUS" != "404" ]; then
   sleep 10
   check_domain "brainstorm.com" "$TMPFILE"
-  STATUS=$(cat "$TMPFILE")
+  STATUS=$(cat "$TMPFILE" 2>/dev/null)
+  [ -z "$STATUS" ] && STATUS="000"
 fi
 
 # Cleanup
@@ -380,10 +383,10 @@ Always verify a ccTLD exists and accepts registrations before suggesting it.
 **Use `--max-time 8` and set bash timeout to 300000ms (5 minutes). Batch ≤10 concurrent, `sleep 5` between batches. Retry failures after a 10-second wait.**
 
 ```bash
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
+WORK_DIR=$(mktemp -d)
+trap 'rm -rf "$WORK_DIR"' EXIT
 
-# --- Domain availability routing (v1.6.8) ---
+# --- Domain availability routing (v1.7.0) ---
 rdap_url() {
   local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   local tld="${domain##*.}"
@@ -419,6 +422,9 @@ rdap_url() {
 
 check_domain() {
   local domain="$1" outfile="$2"
+  if ! printf '%s' "$domain" | grep -qE '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$'; then
+    echo "000" > "$outfile"; return
+  fi
   local url
   url=$(rdap_url "$domain")
   if [ "$url" = "SKIP" ]; then
@@ -426,9 +432,6 @@ check_domain() {
     return
   elif [ "$url" = "WHOIS" ]; then
     local result resp_status
-    if ! printf '%s' "$domain" | grep -qE '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$'; then
-      echo "000" > "$outfile"; return
-    fi
     result=$(curl -s --max-time 10 -X POST \
       -H "Content-Type: application/json" \
       -d "{\"domain\":\"$domain\"}" \
@@ -440,34 +443,34 @@ check_domain() {
     esac
     echo "$resp_status" > "$outfile"
   else
-    curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 "$url" > "$outfile"
+    curl -s -o /dev/null -w "%{http_code}" -L --max-redirs 3 --proto '=https' --proto-redir '=https' --max-time 8 "$url" > "$outfile"
   fi
 }
 
 # --- Batch 1: Close variations + synonyms (10 max) ---
-check_domain "getbrainstorm.com"  "$TMPDIR/getbrainstorm.com"  &
-check_domain "trybrainstorm.com"  "$TMPDIR/trybrainstorm.com"  &
-check_domain "brainstormhq.com"   "$TMPDIR/brainstormhq.com"   &
-check_domain "brainstormlabs.com" "$TMPDIR/brainstormlabs.com" &
-check_domain "brainstormapp.com"  "$TMPDIR/brainstormapp.com"  &
-check_domain "ideate.com"         "$TMPDIR/ideate.com"         &
-check_domain "ideate.io"          "$TMPDIR/ideate.io"          &
-check_domain "thinkstorm.com"     "$TMPDIR/thinkstorm.com"     &
-check_domain "brainwave.io"       "$TMPDIR/brainwave.io"       &
-check_domain "ideaforge.dev"      "$TMPDIR/ideaforge.dev"      &
+check_domain "getbrainstorm.com"  "$WORK_DIR/getbrainstorm.com"  &
+check_domain "trybrainstorm.com"  "$WORK_DIR/trybrainstorm.com"  &
+check_domain "brainstormhq.com"   "$WORK_DIR/brainstormhq.com"   &
+check_domain "brainstormlabs.com" "$WORK_DIR/brainstormlabs.com" &
+check_domain "brainstormapp.com"  "$WORK_DIR/brainstormapp.com"  &
+check_domain "ideate.com"         "$WORK_DIR/ideate.com"         &
+check_domain "ideate.io"          "$WORK_DIR/ideate.io"          &
+check_domain "thinkstorm.com"     "$WORK_DIR/thinkstorm.com"     &
+check_domain "brainwave.io"       "$WORK_DIR/brainwave.io"       &
+check_domain "ideaforge.dev"      "$WORK_DIR/ideaforge.dev"      &
 wait
 sleep 5
 
 # --- Batch 2: Creative + domain hacks ---
-check_domain "mindspark.ai"   "$TMPDIR/mindspark.ai"   &
-check_domain "neuronflow.com" "$TMPDIR/neuronflow.com" &
-check_domain "brainstor.me"   "$TMPDIR/brainstor.me"   &
-check_domain "brainstorm.is"  "$TMPDIR/brainstorm.is"  &
+check_domain "mindspark.ai"   "$WORK_DIR/mindspark.ai"   &
+check_domain "neuronflow.com" "$WORK_DIR/neuronflow.com" &
+check_domain "brainstor.me"   "$WORK_DIR/brainstor.me"   &
+check_domain "brainstorm.is"  "$WORK_DIR/brainstorm.is"  &
 wait
 
 # --- Retry: collect non-definitive results, wait 10s, re-check ---
-RETRYFILE=$(mktemp)
-for F in "$TMPDIR"/*; do
+RETRYFILE=$(mktemp -p "$WORK_DIR")
+for F in "$WORK_DIR"/*; do
   D=$(basename "$F"); STATUS=$(cat "$F")
   if [ "$STATUS" != "200" ] && [ "$STATUS" != "404" ]; then
     echo "$D" >> "$RETRYFILE"
@@ -477,7 +480,7 @@ if [ -s "$RETRYFILE" ]; then
   sleep 10
   BATCH=0
   while IFS= read -r D; do
-    check_domain "$D" "$TMPDIR/$D" &
+    check_domain "$D" "$WORK_DIR/$D" &
     BATCH=$((BATCH+1))
     if [ $BATCH -ge 5 ]; then
       wait; sleep 3; BATCH=0
@@ -489,7 +492,7 @@ rm -f "$RETRYFILE"
 
 # Read all results (404 = available, 200 = taken, else = ❓)
 # Cleanup
-rm -rf "$TMPDIR"
+rm -rf "$WORK_DIR"
 ```
 
 ### Track B Output Format
@@ -684,10 +687,10 @@ For each name:
 **Batch template (adapt for actual names):**
 
 ```bash
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
+WORK_DIR=$(mktemp -d)
+trap 'rm -rf "$WORK_DIR"' EXIT
 
-# --- Domain availability routing (v1.6.8) ---
+# --- Domain availability routing (v1.7.0) ---
 rdap_url() {
   local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   local tld="${domain##*.}"
@@ -723,6 +726,9 @@ rdap_url() {
 
 check_domain() {
   local domain="$1" outfile="$2"
+  if ! printf '%s' "$domain" | grep -qE '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$'; then
+    echo "000" > "$outfile"; return
+  fi
   local url
   url=$(rdap_url "$domain")
   if [ "$url" = "SKIP" ]; then
@@ -730,9 +736,6 @@ check_domain() {
     return
   elif [ "$url" = "WHOIS" ]; then
     local result resp_status
-    if ! printf '%s' "$domain" | grep -qE '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$'; then
-      echo "000" > "$outfile"; return
-    fi
     result=$(curl -s --max-time 10 -X POST \
       -H "Content-Type: application/json" \
       -d "{\"domain\":\"$domain\"}" \
@@ -744,27 +747,27 @@ check_domain() {
     esac
     echo "$resp_status" > "$outfile"
   else
-    curl -s -o /dev/null -w "%{http_code}" -L --max-time 8 "$url" > "$outfile"
+    curl -s -o /dev/null -w "%{http_code}" -L --max-redirs 3 --proto '=https' --proto-redir '=https' --max-time 8 "$url" > "$outfile"
   fi
 }
 
 # Batch 1 (domains 1-10)
-check_domain "vexapp.com"    "$TMPDIR/vexapp.com"    &
-check_domain "vexapp.dev"    "$TMPDIR/vexapp.dev"    &
-check_domain "zolt.io"       "$TMPDIR/zolt.io"       &
-check_domain "zolt.dev"      "$TMPDIR/zolt.dev"      &
-check_domain "gath.er"       "$TMPDIR/gath.er"       &
-check_domain "lumora.com"    "$TMPDIR/lumora.com"    &
-check_domain "lumora.io"     "$TMPDIR/lumora.io"     &
-check_domain "codecraft.com" "$TMPDIR/codecraft.com" &
-check_domain "codecraft.dev" "$TMPDIR/codecraft.dev" &
-check_domain "novari.co"     "$TMPDIR/novari.co"     &
+check_domain "vexapp.com"    "$WORK_DIR/vexapp.com"    &
+check_domain "vexapp.dev"    "$WORK_DIR/vexapp.dev"    &
+check_domain "zolt.io"       "$WORK_DIR/zolt.io"       &
+check_domain "zolt.dev"      "$WORK_DIR/zolt.dev"      &
+check_domain "gath.er"       "$WORK_DIR/gath.er"       &
+check_domain "lumora.com"    "$WORK_DIR/lumora.com"    &
+check_domain "lumora.io"     "$WORK_DIR/lumora.io"     &
+check_domain "codecraft.com" "$WORK_DIR/codecraft.com" &
+check_domain "codecraft.dev" "$WORK_DIR/codecraft.dev" &
+check_domain "novari.co"     "$WORK_DIR/novari.co"     &
 wait
 sleep 5
 
 # Batch 2 (domains 11-20)
-check_domain "zentrik.com"  "$TMPDIR/zentrik.com"  &
-check_domain "zentrik.io"   "$TMPDIR/zentrik.io"   &
+check_domain "zentrik.com"  "$WORK_DIR/zentrik.com"  &
+check_domain "zentrik.io"   "$WORK_DIR/zentrik.io"   &
 # ... (up to 10 total in this batch)
 wait
 sleep 5
@@ -772,8 +775,8 @@ sleep 5
 # Continue batching: ≤10 per batch, sleep 5 between each, until all names are checked
 
 # --- Retry: collect non-definitive results, wait 10s, re-check in batches of 5 ---
-RETRYFILE=$(mktemp)
-for F in "$TMPDIR"/*; do
+RETRYFILE=$(mktemp -p "$WORK_DIR")
+for F in "$WORK_DIR"/*; do
   D=$(basename "$F"); STATUS=$(cat "$F")
   if [ "$STATUS" != "200" ] && [ "$STATUS" != "404" ]; then
     echo "$D" >> "$RETRYFILE"
@@ -783,7 +786,7 @@ if [ -s "$RETRYFILE" ]; then
   sleep 10
   BATCH=0
   while IFS= read -r D; do
-    check_domain "$D" "$TMPDIR/$D" &
+    check_domain "$D" "$WORK_DIR/$D" &
     BATCH=$((BATCH+1))
     if [ $BATCH -ge 5 ]; then
       wait; sleep 3; BATCH=0
@@ -794,13 +797,13 @@ fi
 rm -f "$RETRYFILE"
 
 # Read all results
-STATUS_VEXAPP_COM=$(cat "$TMPDIR/vexapp.com")
-STATUS_VEXAPP_DEV=$(cat "$TMPDIR/vexapp.dev")
-STATUS_ZOLT_IO=$(cat "$TMPDIR/zolt.io")
+STATUS_VEXAPP_COM=$(cat "$WORK_DIR/vexapp.com")
+STATUS_VEXAPP_DEV=$(cat "$WORK_DIR/vexapp.dev")
+STATUS_ZOLT_IO=$(cat "$WORK_DIR/zolt.io")
 # ... etc.
 
 # Cleanup
-rm -rf "$TMPDIR"
+rm -rf "$WORK_DIR"
 ```
 
 Scale the number of batches to cover all checks. Always `wait` + `sleep 5` after each batch before starting the next. The retry pass at the end catches any rate-limited or timed-out domains.
@@ -1095,12 +1098,10 @@ When the user says they want to add their Fastly API token (e.g., "I want to use
 
    ```bash
    mkdir -p ~/.claude/domain-puppy && chmod 700 ~/.claude/domain-puppy
-   ```
-
-   Write `{"fastlyApiToken": "THEIR_TOKEN"}` to `~/.claude/domain-puppy/config.json`.
-
-   ```bash
-   chmod 600 ~/.claude/domain-puppy/config.json
+   TMPCONF=$(mktemp -p ~/.claude/domain-puppy)
+   printf '{"fastlyApiToken":"%s"}\n' "$TOKEN" > "$TMPCONF"
+   chmod 600 "$TMPCONF"
+   mv "$TMPCONF" ~/.claude/domain-puppy/config.json
    ```
 
    Confirm **without echoing the token**:
@@ -1165,7 +1166,12 @@ If the user confirms, **remember consent for the rest of the session** — do no
 
 ### How It Works
 
-**Do not use a pre-built script template.** Instead, use Playwright directly as you would for any browser automation task. You are a capable coding agent — write whatever Playwright code makes sense for the situation.
+Write Playwright code as you would for any browser automation task, but **restrict `page.goto()` calls to these registrar domains only:**
+- `www.name.com`
+- `www.dynadot.com`
+- `sedo.com`
+
+Before constructing any URL, validate the domain with the same regex used in `check_domain()`. Never navigate to a URL that does not match one of the three allowed registrar hosts.
 
 **Goal:** Visit the registrar's domain search page, wait for results to load, extract whether the domain is available/for-sale and at what price.
 

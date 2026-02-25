@@ -3,7 +3,11 @@ node_modules/
 
 # Wrangler
 .wrangler/
-.dev.vars
+
+# Subdirectory secrets
+**/.dev.vars
+**/.env
+**/.env.*
 
 # Build artifacts
 worker/report/
@@ -17,9 +21,11 @@ Thumbs.db
 *.swo
 *~
 
-# Environment and secrets
-.env
-.env.*
+# Certificate and key files
+*.pem
+*.key
+*.p12
+*.pfx
 
 # Internal docs (keep out of public repo)
 internal/
