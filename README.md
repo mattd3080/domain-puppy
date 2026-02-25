@@ -18,11 +18,19 @@ Domain Puppy is a Claude Code skill that turns your terminal into a domain resea
 
 ## Installation
 
+**Universal (works everywhere — terminal, Claude Code, Codex, Cursor, Gemini CLI, etc.):**
+
+```bash
+curl -sL domainpuppy.com/install | sh
+```
+
+**Or via the skills CLI:**
+
 ```bash
 npx skills add mattd3080/domain-puppy
 ```
 
-That's it. Claude will automatically activate Domain Puppy when you mention needing a domain, or invoke it directly: "use domain puppy" or "check if brainstorm.com is available".
+That's it. Start a new conversation and say "find me a domain for [your idea]" — Domain Puppy activates automatically.
 
 ---
 

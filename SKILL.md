@@ -55,13 +55,13 @@ Then proceed to answer the user's request normally.
 
 Keep these short (one line) and always at the end of the response, after the actual results. Never let the nudge interrupt the user's workflow.
 
-**When the user says "yes", "update", "upgrade", or similar:** Run the update using the standalone `skills` CLI (not `claude skills add`, which would crash due to session nesting):
+**When the user says "yes", "update", "upgrade", or similar:** Run the update:
 
 ```bash
-npx skills add mattd3080/domain-puppy --yes
+curl -sL domainpuppy.com/install | sh
 ```
 
-The `--yes` flag skips interactive prompts so it completes automatically. This is the same trusted install command the user already ran to install Domain Puppy. It fetches from GitHub and overwrites the local SKILL.md with the latest version.
+This downloads the latest SKILL.md from GitHub and installs it to all detected agent directories. No dependencies beyond curl. Works inside any AI coding session or plain terminal.
 
 After the command completes, confirm:
 
@@ -69,11 +69,11 @@ After the command completes, confirm:
 
 Then clear the `update_available` flag for the rest of the session. Stop showing nudges.
 
-**If the update command fails:** Show the error and offer the manual path:
+**If the update command fails:** Show the error and suggest:
 
-> Update hit an issue. You can update manually in a separate terminal:
+> Update hit an issue. You can try manually:
 > ```
-> npx skills add mattd3080/domain-puppy --yes
+> curl -sL domainpuppy.com/install | sh
 > ```
 
 Do not retry automatically.
