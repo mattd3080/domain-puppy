@@ -1101,9 +1101,8 @@ Determine which registrar to scrape based on TLD:
 | TLD | Registrar | Search URL |
 |-----|-----------|------------|
 | `.st`, `.to`, `.pt`, `.my`, `.gg` | Dynadot | `https://www.dynadot.com/domain/search?domain={domain}` |
+| `.ly`, `.is` | — (skip) | Neither name.com (strips the dot) nor Dynadot (doesn't sell these TLDs) can reliably scrape pricing. The script returns `{ found: false }` and falls through to the manual link. |
 | Everything else | name.com | `https://www.name.com/domain/search/{domain}` |
-
-This must match the routing table in Step 3e.
 
 ---
 
@@ -1126,7 +1125,13 @@ if (!domain || !/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[
 
 const tld = domain.split('.').pop();
 const dynadotTLDs = ['st', 'to', 'pt', 'my', 'gg'];
+const noScrapeTLDs = ['ly', 'is'];  // name.com strips the dot, Dynadot doesn't sell them
 const isDynadot = dynadotTLDs.includes(tld);
+
+if (noScrapeTLDs.includes(tld)) {
+  console.log(JSON.stringify({ found: false, error: 'tld_not_supported_by_registrar_scraper' }));
+  process.exit(0);
+}
 
 const url = isDynadot
   ? `https://www.dynadot.com/domain/search?domain=${encodeURIComponent(domain)}`
@@ -1139,43 +1144,37 @@ const url = isDynadot
     const page = await browser.newPage();
 
     if (isDynadot) {
-      // Dynadot: intercept the search API response for reliable price extraction
-      let priceFound = false;
-      page.on('response', async (resp) => {
-        try {
-          if (resp.url().includes('/domain/search') && resp.status() === 200) {
-            const text = await resp.text();
-            // Look for price patterns in API responses
-            const priceMatch = text.match(/\$[\d,]+\.?\d{0,2}/);
-            if (priceMatch && !priceFound) {
-              priceFound = true;
-              console.log(JSON.stringify({ found: true, price: priceMatch[0], registrar: 'Dynadot', url }));
-            }
-          }
-        } catch {}
-      });
-      await page.goto(url, { timeout: 15000, waitUntil: 'networkidle' });
-      // Fallback: check rendered DOM if network intercept missed it
-      if (!priceFound) {
-        try {
-          const priceEl = await page.locator('text=/\\$[\\d,]+\\.?\\d{0,2}/')
-            .first()
-            .textContent({ timeout: 8000 });
-          if (priceEl) {
-            const match = priceEl.match(/\$[\d,]+\.?\d{0,2}/);
-            if (match) {
-              console.log(JSON.stringify({ found: true, price: match[0], registrar: 'Dynadot', url }));
-              priceFound = true;
-            }
-          }
-        } catch {}
+      // Dynadot: navigate, then check the TARGET domain's result (not suggestions)
+      await page.goto(url, { timeout: 15000, waitUntil: 'domcontentloaded' });
+      await new Promise(r => setTimeout(r, 3000));  // allow Vue to render
+
+      const bodyText = await page.evaluate(() => document.body.innerText).catch(() => '');
+
+      // Check if Dynadot doesn't support this TLD
+      if (/do not support|does not support|not supported/i.test(bodyText)) {
+        console.log(JSON.stringify({ found: false, registrar: 'Dynadot', url, error: 'tld_not_supported' }));
       }
-      if (!priceFound) {
-        console.log(JSON.stringify({ found: false, registrar: 'Dynadot', url }));
+      // Check if the target domain is shown as taken (hire a broker / whois / taken)
+      else if (new RegExp(domain.replace('.', '\\.') + '.*?(taken|hire a broker|whois)', 'is').test(bodyText)) {
+        console.log(JSON.stringify({ found: false, registrar: 'Dynadot', url, error: 'domain_taken' }));
+      }
+      // Only trust price signals if they appear near the target domain name
+      else {
+        const lines = bodyText.split('\n');
+        const targetLines = lines.filter(l => l.toLowerCase().includes(domain));
+        const targetContext = targetLines.join(' ');
+        const priceMatch = targetContext.match(/\$[\d,]+\.?\d{0,2}/);
+        if (priceMatch) {
+          console.log(JSON.stringify({ found: true, price: priceMatch[0], registrar: 'Dynadot', url }));
+        } else {
+          console.log(JSON.stringify({ found: false, registrar: 'Dynadot', url }));
+        }
       }
     } else {
-      // name.com: wait for page load, then find price via text pattern
-      await page.goto(url, { timeout: 15000, waitUntil: 'networkidle' });
+      // name.com: use domcontentloaded + delay (networkidle hangs on some TLDs)
+      await page.goto(url, { timeout: 15000, waitUntil: 'domcontentloaded' });
+      await new Promise(r => setTimeout(r, 3000));  // allow JS to render results
+
       try {
         const priceEl = await page.locator('text=/\\$[\\d,]+\\.?\\d{0,2}/')
           .first()
