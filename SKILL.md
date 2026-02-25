@@ -1,7 +1,7 @@
 ---
 name: domain-puppy
 description: This skill should be used when the user asks to "check if a domain is available", "find a domain name", "brainstorm domain names", "is X.com taken", "search for domains", or is trying to name a product, app, or startup and needs domain options. Also activate when the user mentions needing a domain or asks about aftermarket domains listed for sale.
-version: 1.6.2
+version: 1.6.3
 allowed-tools: Bash
 metadata: {"openclaw": {"requires": {"bins": ["curl"]}, "homepage": "https://github.com/mattd3080/domain-puppy"}}
 ---
@@ -17,7 +17,7 @@ You are Domain Puppy, a helpful domain-hunting assistant. Follow these instructi
 On first activation in a session, check if a newer version is available. Do not block or delay the user's request — run this in the background alongside Step 1.
 
 ```bash
-LOCAL_VERSION="1.6.2"
+LOCAL_VERSION="1.6.3"
 REMOTE_VERSION=$(curl -s --max-time 3 "https://raw.githubusercontent.com/mattd3080/domain-puppy/main/SKILL.md" | grep '^version:' | head -1 | awk '{print $2}')
 if ! printf '%s' "$REMOTE_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then REMOTE_VERSION=""; fi
 version_gt() {
@@ -132,7 +132,7 @@ Check the single domain determined in Step 3a. The following is a template using
 TMPFILE=$(mktemp)
 trap 'rm -f "$TMPFILE"' EXIT
 
-# --- Domain availability routing (v1.6.2) ---
+# --- Domain availability routing (v1.6.3) ---
 rdap_url() {
   local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   local tld="${domain##*.}"
@@ -381,7 +381,7 @@ Always verify a ccTLD exists and accepts registrations before suggesting it.
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
-# --- Domain availability routing (v1.6.2) ---
+# --- Domain availability routing (v1.6.3) ---
 rdap_url() {
   local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   local tld="${domain##*.}"
@@ -690,7 +690,7 @@ For each name:
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
-# --- Domain availability routing (v1.6.2) ---
+# --- Domain availability routing (v1.6.3) ---
 rdap_url() {
   local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   local tld="${domain##*.}"
@@ -946,8 +946,20 @@ Always use `-s` on curl to suppress output that might contain the key. Never log
 When the proxy returns 429, first check if Playwright is available (this only runs when needed, not on every session):
 
 ```bash
-(npx --no-install playwright --version 2>/dev/null || playwright --version 2>/dev/null) && echo "playwright_available=true" || echo "playwright_available=false"
+# Check if Playwright's Node module is actually require()-able (not just the CLI)
+PLAYWRIGHT_PATH=$(node -e "try { console.log(require.resolve('playwright').replace(/\/index\.js$/, '')) } catch(e) {}" 2>/dev/null)
+if [ -z "$PLAYWRIGHT_PATH" ]; then
+  # Try with home node_modules (common install location)
+  PLAYWRIGHT_PATH=$(NODE_PATH="$HOME/node_modules" node -e "try { console.log(require.resolve('playwright').replace(/\/index\.js$/, '')) } catch(e) {}" 2>/dev/null)
+fi
+if [ -n "$PLAYWRIGHT_PATH" ]; then
+  echo "playwright_available=true node_path=$(dirname "$PLAYWRIGHT_PATH")"
+else
+  echo "playwright_available=false"
+fi
 ```
+
+Store the `node_path` value from the output — it is needed in Step 10 to set `NODE_PATH` so the temp script can find the module.
 
 Present a friendly message — no alarm language ("error", "exceeded", "limit"). The options depend on the result above.
 
@@ -1179,10 +1191,14 @@ Determine which registrar to scrape based on TLD:
 
 Write a short Node.js script to a temp file, run it, and clean up. The script is a **static template** — no user-supplied data is interpolated into the script source. The domain is passed exclusively as a CLI argument (`process.argv[2]`).
 
+Use the `node_path` value from the Playwright detection in Step 8 to set `NODE_PATH`, so the temp script can find the module regardless of where it's installed.
+
 ```bash
 TMPSCRIPT=$(mktemp "${TMPDIR:-/tmp}/domain-puppy-scrape-XXXXXX.cjs")
 chmod 600 "$TMPSCRIPT"
 trap 'rm -f "$TMPSCRIPT"' EXIT
+# Set NODE_PATH from Step 8 detection (e.g., /Users/you/node_modules)
+export NODE_PATH="{node_path from Step 8 detection}"
 
 cat > "$TMPSCRIPT" << 'SCRAPE_EOF'
 const { chromium } = require('playwright');
