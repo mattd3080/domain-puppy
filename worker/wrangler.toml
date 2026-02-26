@@ -6,7 +6,7 @@ compatibility_date = "2025-01-01"
 # Non-secret configuration
 MONTHLY_QUOTA_LIMIT = "8000"
 FREE_CHECKS_PER_IP = "5"
-SKILL_VERSION = "1.9.2"
+SKILL_VERSION = "1.9.3"
 
 # FASTLY_API_TOKEN is stored as a Cloudflare secret — set via:
 #   wrangler secret put FASTLY_API_TOKEN

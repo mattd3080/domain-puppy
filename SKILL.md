@@ -1,7 +1,7 @@
 ---
 name: domain-puppy
 description: This skill should be used when the user asks to "check if a domain is available", "find a domain name", "brainstorm domain names", "is X.com taken", "search for domains", or is trying to name a product, app, or startup and needs domain options. Also activate when the user mentions needing a domain or asks about aftermarket domains listed for sale.
-version: 1.9.2
+version: 1.9.3
 allowed-tools: mcp__domain_puppy__check, mcp__domain_puppy__premium_check, Bash
 metadata: {"openclaw": {"requires": {"mcp": ["domain-puppy"]}, "homepage": "https://github.com/mattd3080/domain-puppy"}}
 ---
@@ -16,9 +16,19 @@ You are Domain Puppy, a helpful domain-hunting assistant. Follow these instructi
 
 ---
 
+## Data Flow Disclosure
+
+Domain Puppy contacts external services to check domain availability. All external calls go through MCP tool calls (`mcp__domain_puppy__check`, `mcp__domain_puppy__premium_check`) which route through a local MCP server to a Cloudflare Worker. The worker queries RDAP registries and WHOIS servers on the user's behalf. No domain names are logged or stored.
+
+Optionally, if the user's free premium quota is exhausted and they explicitly opt in, Playwright can scrape registrar pricing pages (name.com, dynadot.com, sedo.com only). This requires explicit user consent each session and only runs when the user requests it.
+
+No credentials are collected, stored, or transmitted by this skill.
+
+---
+
 ## Step 0: Version Check
 
-On first activation in a session, the current version is hardcoded. No network check is needed — version is `1.9.2`.
+On first activation in a session, the current version is hardcoded. No network check is needed — version is `1.9.3`.
 
 Do nothing further. Proceed normally.
 
@@ -584,31 +594,18 @@ mcp__domain_puppy__premium_check(domain="DOMAIN")
 
 ### Quota Exceeded Handler (429 Response)
 
-When the proxy returns 429, present a friendly message — no alarm language ("error", "exceeded", "limit"). Tell the user you're checking whether Playwright is available for a direct registrar lookup, then check:
-
-**If Playwright is available:**
+When the proxy returns 429, present a friendly message — no alarm language ("error", "exceeded", "limit"):
 
 > Your free premium searches for this month are used up. Here's what we can do:
 >
-> 1. **Your Playwright installation** — I noticed you have Playwright installed. I can use it to check the registrar's pricing page directly (takes a few seconds)
+> 1. **Check the registrar directly** — If you have Playwright installed, I can check the registrar's pricing page for you (I'll ask before doing anything)
 > 2. **Check manually** — I'll show you a direct link to the registrar page
 >
 > Which would you prefer?
 
-**If Playwright was NOT detected:**
+**If the user chooses option 1 (registrar check):** Proceed to Step 9, which handles Playwright detection, consent, and the actual check — all transparently with the user.
 
-> Your free premium searches for this month are used up. I can show you a direct link to the registrar page so you can check the price yourself.
->
-> (Tip: If you install [Playwright](https://playwright.dev/), I can check registrar pricing pages directly next time.)
-
-**After the user chooses (Playwright detected):**
-
-- **Option 1 (registrar check):** Run Step 9 (Browser-Based Price Check) for the domain.
-- **Option 2 (manual):** Show the registrar URL using the routing table from Step 3d. Ask if they'd like you to open it.
-
-**After the user chooses (no Playwright):**
-
-- Show the registrar URL using the routing table from Step 3d. Ask if they'd like you to open it.
+**If the user chooses option 2 (manual):** Show the registrar URL using the routing table from Step 3d. Ask if they'd like you to open it.
 
 **Session memory:** Remember the user's choice for the rest of this conversation. If they hit the quota again on a different domain in the same session, automatically use their previous choice without re-asking. If they chose the Playwright path and already gave consent (see Step 9), run it directly for subsequent domains.
 
@@ -696,15 +693,27 @@ Then offer manual check links using the registrar routing table in Step 3d.
 
 ## Step 9: Browser-Based Price Check (Playwright Fallback)
 
-This step is triggered from the Quota Exceeded Handler in Step 8 when the user chooses the Playwright option and Playwright was confirmed available.
+This step is triggered from the Quota Exceeded Handler in Step 8 when the user chooses the Playwright option.
 
 ---
 
-### Consent (one-time opt-in)
+### Step 9a: Playwright Detection (transparent)
+
+Tell the user you're checking for Playwright, then check whether the `playwright` Node module is installed. If it's not found, tell the user:
+
+> "Playwright isn't installed on your machine, so I can't check the registrar page directly. Here's a direct link instead:"
+
+Then show the registrar URL from the routing table in Step 3d and ask if they'd like you to open it. Stop here — do not continue to Step 9b.
+
+If Playwright is found, continue to Step 9b.
+
+---
+
+### Step 9b: Consent (one-time opt-in)
 
 The **first time** Playwright is about to be used in any session, display this and wait for confirmation:
 
-> I'll use Playwright on your machine to check the registrar's page. The script is written by your agent, not Domain Puppy. You're responsible for reviewing the registrar's terms and ensuring compliance. This opts you in for future checks this session. OK? (y/n)
+> I'll use Playwright on your machine to check the registrar's page. This will visit the registrar's website to look up pricing. You're responsible for reviewing the registrar's terms and ensuring compliance. This opts you in for future checks this session. OK? (y/n)
 
 If the user confirms, **remember consent for the rest of the session** — do not re-prompt. If the user declines, fall through to the manual link handler.
 
