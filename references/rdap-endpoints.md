@@ -1,6 +1,8 @@
 # RDAP Endpoint Map
 
-Canonical reference for all 77 TLDs supported by Domain Puppy. Documents the exact RDAP endpoint per registry, the `rdap_url()` bash function used in all SKILL.md templates, and the fallback chain.
+> **Architecture note (v1.9.0):** The RDAP routing table is implemented inside the Cloudflare Worker (`worker/src/index.js`). SKILL.md calls the `mcp__domain_puppy__check` MCP tool, which routes through a thin MCP server layer (`mcp/src/server.js`) that wraps `POST /v1/check` on the worker. SKILL.md never makes direct RDAP requests or direct worker HTTP calls. This document is now primarily a maintenance reference — use it when adding new TLDs, updating endpoints, or auditing the worker's routing table. The TLD-to-endpoint mappings below remain the canonical source of truth for the worker implementation.
+
+Canonical reference for all 77 TLDs supported by Domain Puppy. Documents the exact RDAP endpoint per registry and the fallback chain used inside the worker.
 
 ---
 
@@ -148,7 +150,7 @@ No RDAP available. Routed through the worker's WHOIS proxy.
 
 ## The `rdap_url()` Canonical Function
 
-Copy this function **verbatim** into all 4 SKILL.md templates. Do not modify the URL patterns or case labels without also updating this file.
+This function is implemented inside `worker/src/index.js` as the worker's internal routing table. Do not modify the URL patterns or case labels without also updating this file.
 
 ```bash
 rdap_url() {
@@ -216,5 +218,5 @@ When adding a new TLD:
 
 1. **Check IANA bootstrap first** — `https://data.iana.org/rdap/dns.json` — if the TLD is listed, use that URL.
 2. **Not in IANA bootstrap?** Check if Identity Digital serves it (`rdap.identitydigital.services`). Mark it ⚠️ unofficial if so.
-3. **No RDAP at all?** Add to the WHOIS proxy whitelist in the worker and add a `WHOIS` case to `rdap_url()`.
-4. Update this file, `tld-catalog.md`, and all 4 SKILL.md templates in sync.
+3. **No RDAP at all?** Add to the WHOIS proxy whitelist in the worker and add a `WHOIS` case to the worker's routing table.
+4. Update this file and `tld-catalog.md` in sync with `worker/src/index.js`.

@@ -1,0 +1,13 @@
+{
+  "name": "domain-puppy-mcp",
+  "version": "1.9.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test src/server.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}

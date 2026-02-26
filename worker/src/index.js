@@ -408,6 +408,328 @@ async function handleVersionCheck(request, env) {
 }
 
 // ---------------------------------------------------------------------------
+// Domain availability check — RDAP routing table (Layer 1)
+// ---------------------------------------------------------------------------
+
+// Privacy: domain names are never logged, stored, or transmitted beyond the RDAP/WHOIS lookup.
+
+/** Builds an Identity Digital RDAP URL. */
+const _idUrl = (d) => `https://rdap.identitydigital.services/rdap/domain/${d}`;
+
+/** Builds a CentralNic RDAP URL (TLD is part of the path). */
+const _cnUrl = (tld) => (d) => `https://rdap.centralnic.com/${tld}/domain/${d}`;
+
+/**
+ * RDAP_ROUTES maps each supported TLD (without the dot) to a function that
+ * takes the full domain and returns the RDAP lookup URL.
+ *
+ * Source of truth: references/rdap-endpoints.md
+ */
+const RDAP_ROUTES = {
+  // --- Verisign (3 TLDs) ---
+  com:  (d) => `https://rdap.verisign.com/com/v1/domain/${d}`,
+  net:  (d) => `https://rdap.verisign.com/net/v1/domain/${d}`,
+  cc:   (d) => `https://tld-rdap.verisign.com/cc/v1/domain/${d}`,
+
+  // --- Google (2 TLDs) ---
+  dev: (d) => `https://pubapi.registry.google/rdap/domain/${d}`,
+  app: (d) => `https://pubapi.registry.google/rdap/domain/${d}`,
+
+  // --- Identity Digital (34 TLDs; .io, .me, .sh are unofficial but verified working) ---
+  ai:          _idUrl,
+  io:          _idUrl,
+  me:          _idUrl,
+  sh:          _idUrl,
+  tools:       _idUrl,
+  codes:       _idUrl,
+  run:         _idUrl,
+  studio:      _idUrl,
+  gallery:     _idUrl,
+  media:       _idUrl,
+  chat:        _idUrl,
+  coffee:      _idUrl,
+  cafe:        _idUrl,
+  ventures:    _idUrl,
+  supply:      _idUrl,
+  agency:      _idUrl,
+  capital:     _idUrl,
+  community:   _idUrl,
+  social:      _idUrl,
+  group:       _idUrl,
+  team:        _idUrl,
+  market:      _idUrl,
+  deals:       _idUrl,
+  academy:     _idUrl,
+  school:      _idUrl,
+  training:    _idUrl,
+  care:        _idUrl,
+  clinic:      _idUrl,
+  band:        _idUrl,
+  money:       _idUrl,
+  finance:     _idUrl,
+  fund:        _idUrl,
+  tax:         _idUrl,
+  investments: _idUrl,
+
+  // --- CentralNic (10 TLDs; TLD is included in path) ---
+  xyz:   _cnUrl('xyz'),
+  build: _cnUrl('build'),
+  art:   _cnUrl('art'),
+  game:  _cnUrl('game'),
+  quest: _cnUrl('quest'),
+  lol:   _cnUrl('lol'),
+  inc:   _cnUrl('inc'),
+  store: _cnUrl('store'),
+  audio: _cnUrl('audio'),
+  fm:    _cnUrl('fm'),
+
+  // --- Dedicated NICs (9 TLDs) ---
+  design:  (d) => `https://rdap.nic.design/domain/${d}`,
+  ink:     (d) => `https://rdap.nic.ink/domain/${d}`,
+  menu:    (d) => `https://rdap.nic.menu/domain/${d}`,
+  club:    (d) => `https://rdap.nic.club/domain/${d}`,
+  courses: (d) => `https://rdap.nic.courses/domain/${d}`,
+  health:  (d) => `https://rdap.nic.health/domain/${d}`,
+  fit:     (d) => `https://rdap.nic.fit/domain/${d}`,
+  music:   (d) => `https://rdap.registryservices.music/rdap/domain/${d}`,
+  shop:    (d) => `https://rdap.gmoregistry.net/rdap/domain/${d}`,
+
+  // --- ccTLDs with IANA RDAP (6 TLDs) ---
+  ly: (d) => `https://rdap.nic.ly/domain/${d}`,
+  is: (d) => `https://rdap.isnic.is/rdap/domain/${d}`,
+  to: (d) => `https://rdap.tonicregistry.to/rdap/domain/${d}`,
+  in: (d) => `https://rdap.nixiregistry.in/rdap/domain/${d}`,
+  re: (d) => `https://rdap.nic.re/domain/${d}`,
+  no: (d) => `https://rdap.norid.no/domain/${d}`,
+};
+
+/**
+ * TLDs handled by the existing whoisLookup() function.
+ * These are the 12 ccTLDs with no RDAP, routed through the WHOIS proxy.
+ */
+const WHOIS_TLDS = new Set(['co', 'it', 'de', 'be', 'at', 'se', 'gg', 'st', 'pt', 'my', 'nu', 'am']);
+
+/**
+ * TLDs where availability checking is unreliable and should be skipped.
+ * .es requires IP-based authentication — always returns unknown.
+ */
+const SKIP_TLDS = new Set(['es']);
+
+/** Per-domain RDAP fetch timeout in milliseconds. */
+const RDAP_TIMEOUT_MS = 8000;
+
+/**
+ * Fetches an RDAP URL with a timeout and returns the HTTP status code.
+ * Returns null on network failure or timeout.
+ */
+async function fetchRdapStatus(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), RDAP_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'Accept': 'application/rdap+json' },
+    });
+    return response.status;
+  } catch {
+    return null; // Network error or timeout
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Maps an RDAP HTTP status code to a domain availability status string.
+ * 200 → taken, 404 → available, anything else → unknown.
+ */
+function mapRdapStatus(httpStatus) {
+  if (httpStatus === 200) return 'taken';
+  if (httpStatus === 404) return 'available';
+  return 'unknown';
+}
+
+/**
+ * Checks a single domain via RDAP with one retry for non-definitive responses.
+ * Non-definitive: null (error/timeout), 429, or 5xx.
+ *
+ * Returns { status, reason? }.
+ */
+async function checkDomainRdap(domain, tld) {
+  const urlFn = RDAP_ROUTES[tld];
+  const url = urlFn(domain);
+
+  let httpStatus = await fetchRdapStatus(url);
+
+  // Retry once for non-definitive results (timeout=null, 429, 5xx)
+  const isNonDefinitive = httpStatus === null || httpStatus === 429 || (httpStatus >= 500 && httpStatus < 600);
+  if (isNonDefinitive) {
+    // Wait 2 seconds then retry
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    httpStatus = await fetchRdapStatus(url);
+  }
+
+  const status = httpStatus !== null ? mapRdapStatus(httpStatus) : 'unknown';
+  if (status === 'unknown') {
+    return { status, reason: httpStatus === null ? 'timeout' : `http_${httpStatus}` };
+  }
+  return { status };
+}
+
+/**
+ * Checks a single domain via the existing WHOIS infrastructure.
+ * Calls whoisLookup() directly — does not make an HTTP request to /v1/whois-check.
+ *
+ * Returns { status, reason? }.
+ */
+async function checkDomainWhois(domain, tld) {
+  const server = WHOIS_SERVERS[tld];
+  if (!server) return { status: 'unknown', reason: 'no_whois_server' };
+
+  try {
+    const raw = await whoisLookup(domain, server);
+    const status = parseWhoisResponse(raw, server);
+    if (status === 'unknown') return { status, reason: 'whois_inconclusive' };
+    return { status };
+  } catch {
+    return { status: 'unknown', reason: 'whois_error' };
+  }
+}
+
+/**
+ * Determines the availability of a single domain by routing to RDAP, WHOIS,
+ * or returning a skip/unknown result based on TLD.
+ *
+ * Returns { status, reason? }.
+ */
+async function checkSingleDomain(domain, tld) {
+  if (SKIP_TLDS.has(tld)) {
+    return { status: 'skip', reason: 'tld_not_supported' };
+  }
+  if (WHOIS_TLDS.has(tld)) {
+    return checkDomainWhois(domain, tld);
+  }
+  if (RDAP_ROUTES[tld]) {
+    return checkDomainRdap(domain, tld);
+  }
+  // No RDAP and not in WHOIS list — unknown TLD, no rdap.org fallback
+  return { status: 'unknown', reason: 'tld_not_supported' };
+}
+
+/**
+ * Handles POST /v1/check.
+ *
+ * Privacy: domain names are never logged, stored, or transmitted beyond the RDAP/WHOIS lookup.
+ *
+ * Accepts: { domains: string[] }  (1–20 elements, valid domain format)
+ * Returns: { version, results, meta }
+ */
+async function handleDomainCheck(request, env, ctx) {
+  // Per-IP burst rate limit (10/min — same default as other endpoints)
+  const clientIP = getClientIP(request);
+  const { limited } = await checkRateLimit(env, clientIP, 10);
+  if (limited) {
+    return errorResponse(429, 'rate_limited', 'Too many requests. Please wait a moment.');
+  }
+
+  // Enforce Content-Type: application/json
+  const contentType = request.headers.get('Content-Type') || '';
+  if (!contentType.includes('application/json')) {
+    return errorResponse(400, 'bad_request', 'Content-Type must be application/json');
+  }
+
+  // Reject oversized payloads (8KB — larger than other endpoints due to array input)
+  const contentLength = parseInt(request.headers.get('Content-Length') || '0', 10);
+  if (contentLength > 8192) {
+    return errorResponse(413, 'payload_too_large', 'Request body too large');
+  }
+
+  // Parse body
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse(400, 'bad_request', 'Request body is not valid JSON');
+  }
+
+  // Validate domains field
+  if (!body || !('domains' in body)) {
+    return errorResponse(400, 'bad_request', 'Missing required field: domains');
+  }
+  if (!Array.isArray(body.domains)) {
+    return errorResponse(400, 'bad_request', 'Field "domains" must be an array');
+  }
+  if (body.domains.length === 0) {
+    return errorResponse(400, 'bad_request', 'Field "domains" must not be empty');
+  }
+  if (body.domains.length > 20) {
+    return errorResponse(400, 'bad_request', 'Field "domains" exceeds the maximum of 20 domains per request');
+  }
+
+  // Validate each element
+  for (const item of body.domains) {
+    if (typeof item !== 'string') {
+      return errorResponse(400, 'bad_request', 'Each element in "domains" must be a string');
+    }
+  }
+
+  // Normalise to lowercase, then deduplicate
+  const normalised = body.domains.map(d => d.toLowerCase());
+  const unique = [...new Set(normalised)];
+
+  // Validate domain formats
+  for (const domain of unique) {
+    if (!isValidDomain(domain)) {
+      return errorResponse(400, 'bad_request', `Invalid domain format: ${domain}`);
+    }
+  }
+
+  const startMs = Date.now();
+
+  // Check all domains in parallel
+  const settledResults = await Promise.allSettled(
+    unique.map(async (domain) => {
+      const tld = domain.split('.').pop();
+      const result = await checkSingleDomain(domain, tld);
+      return { domain, result };
+    })
+  );
+
+  const durationMs = Date.now() - startMs;
+
+  // Build results map
+  const results = {};
+  let completed = 0;
+  let incomplete = 0;
+
+  for (const settled of settledResults) {
+    if (settled.status === 'fulfilled') {
+      const { domain, result } = settled.value;
+      results[domain] = result;
+      if (result.status !== 'unknown') {
+        completed++;
+      } else {
+        incomplete++;
+      }
+    } else {
+      // Promise itself rejected (should not happen — checkSingleDomain catches internally)
+      // We don't know which domain this was, so this is a safety path only.
+      incomplete++;
+    }
+  }
+
+  return jsonResponse({
+    version: '1',
+    results,
+    meta: {
+      checked: unique.length,
+      completed,
+      incomplete,
+      duration_ms: durationMs,
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // WHOIS availability checking (Layer 2 — 13 ccTLDs without RDAP)
 // ---------------------------------------------------------------------------
 
@@ -775,6 +1097,11 @@ export default {
       // Route: POST /v1/whois-check
       if (request.method === 'POST' && url.pathname === '/v1/whois-check') {
         return await handleWhoisCheck(request, env);
+      }
+
+      // Route: POST /v1/check
+      if (request.method === 'POST' && url.pathname === '/v1/check') {
+        return await handleDomainCheck(request, env, ctx);
       }
 
       // All other routes → 404

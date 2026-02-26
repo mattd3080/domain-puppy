@@ -1,9 +1,9 @@
 ---
 name: domain-puppy
 description: This skill should be used when the user asks to "check if a domain is available", "find a domain name", "brainstorm domain names", "is X.com taken", "search for domains", or is trying to name a product, app, or startup and needs domain options. Also activate when the user mentions needing a domain or asks about aftermarket domains listed for sale.
-version: 1.7.0
-allowed-tools: Bash
-metadata: {"openclaw": {"requires": {"bins": ["curl"]}, "homepage": "https://github.com/mattd3080/domain-puppy"}}
+version: 1.9.0
+allowed-tools: mcp__domain_puppy__check, mcp__domain_puppy__premium_check, Bash
+metadata: {"openclaw": {"requires": {"mcp": ["domain-puppy"]}, "homepage": "https://github.com/mattd3080/domain-puppy"}}
 ---
 
 # Domain Puppy
@@ -18,55 +18,17 @@ You are Domain Puppy, a helpful domain-hunting assistant. Follow these instructi
 
 ## Step 0: Version Check (run once per session, silently)
 
-On first activation in a session, check if a newer version is available. Do not block or delay the user's request — run this in the background alongside Step 1.
+On first activation in a session, the current version is hardcoded. No network check is needed — version is `1.9.0`.
 
-```bash
-LOCAL_VERSION="1.7.0"
-REMOTE_VERSION=$(curl -s --max-time 3 "https://domainpuppy.com/api/version" | grep -o '"version":"[^"]*"' | grep -o '[0-9][^"]*')
-if ! printf '%s' "$REMOTE_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then REMOTE_VERSION=""; fi
-version_gt() {
-  [ "$(printf '%s\n%s' "$1" "$2" | sort -V | tail -1)" = "$1" ] && [ "$1" != "$2" ]
-}
-if [ -n "$REMOTE_VERSION" ] && version_gt "$REMOTE_VERSION" "$LOCAL_VERSION"; then
-  echo "update_available=true local=$LOCAL_VERSION remote=$REMOTE_VERSION"
-else
-  echo "up_to_date=true version=$LOCAL_VERSION"
-fi
-```
-
-### If versions match or the curl fails
-
-Do nothing. Proceed normally.
+Do nothing further. Proceed normally.
 
 ### If a newer version is available
 
-Set a session flag: `update_available=true`. This flag persists for the entire session and drives the behavior below.
+The installed version is always shown in the frontmatter. Users can update via:
 
-**First message (on activation):** Before answering the user's request, show this prominently:
-
-> **Domain Puppy v{REMOTE_VERSION} is available** (you're on v{LOCAL_VERSION}). Say "update" for instructions.
-
-Then proceed to answer the user's request normally.
-
-**Every subsequent message while `update_available=true`:** After presenting results, append a brief nudge. Vary the wording to avoid feeling robotic — rotate through lines like:
-
-- > Reminder: Domain Puppy v{REMOTE_VERSION} is available. Say "update" for install instructions.
-- > You're still on v{LOCAL_VERSION} — say "update" to see how to upgrade.
-- > Quick note: a newer version of Domain Puppy is ready. Just say "update".
-
-Keep these short (one line) and always at the end of the response, after the actual results. Never let the nudge interrupt the user's workflow.
-
-**When the user says "yes", "update", "upgrade", or similar:** Show the update instructions — **do not execute any install command**:
-
-> To update Domain Puppy, run this in your terminal:
->
 > ```
-> npx skills add mattd3080/domain-puppy
+> bunx skills add mattd3080/domain-puppy
 > ```
->
-> Then start a new conversation to use the updated version.
-
-Then clear the `update_available` flag for the rest of the session. Stop showing nudges.
 
 ---
 
@@ -112,116 +74,37 @@ Determine the single domain to check:
 - **Full domain with TLD** (e.g., "brainstorm.dev") → check exactly `brainstorm.dev`
 - **Base name without TLD** (e.g., "brainstorm") → default to `{base}.com` (check `brainstorm.com`)
 
-### 3b. Run a Single RDAP Availability Check
+### 3b. Run a Single Availability Check
 
-Use `curl` against the RDAP protocol to check the domain. RDAP returns:
-- **HTTP 404** = domain is likely **available**
-- **HTTP 200** = domain is **taken**
-- **Any other status or timeout** = **couldn't check**
+Check the single domain determined in Step 3a using the MCP tool. The tool handles all registry routing internally. The following is an example using `brainstorm.com` — replace with the actual domain.
 
-Check the single domain determined in Step 3a. The following is a template using `brainstorm.com` as an example — replace with the actual domain.
+Use the `mcp__domain_puppy__check` tool to check availability:
 
-```bash
-TMPFILE=""
-trap 'rm -f "$TMPFILE"' EXIT
-TMPFILE=$(mktemp)
+Tool call: mcp__domain_puppy__check
+Arguments: { "domains": ["brainstorm.com"] }
 
-# --- Domain availability routing (v1.7.0) ---
-rdap_url() {
-  local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
-  local tld="${domain##*.}"
-  case "$tld" in
-    com) echo "https://rdap.verisign.com/com/v1/domain/${domain}" ;;
-    net) echo "https://rdap.verisign.com/net/v1/domain/${domain}" ;;
-    cc) echo "https://tld-rdap.verisign.com/cc/v1/domain/${domain}" ;;
-    dev|app) echo "https://pubapi.registry.google/rdap/domain/${domain}" ;;
-    ai|io|me|sh|tools|codes|run|studio|gallery|media|chat|coffee|cafe|ventures|supply|agency|capital|community|social|group|team|market|deals|academy|school|training|care|clinic|band|money|finance|fund|tax|investments)
-      echo "https://rdap.identitydigital.services/rdap/domain/${domain}" ;;
-    xyz|build|art|game|quest|lol|inc|store|audio|fm)
-      echo "https://rdap.centralnic.com/${tld}/domain/${domain}" ;;
-    design) echo "https://rdap.nic.design/domain/${domain}" ;;
-    ink) echo "https://rdap.nic.ink/domain/${domain}" ;;
-    menu) echo "https://rdap.nic.menu/domain/${domain}" ;;
-    club) echo "https://rdap.nic.club/domain/${domain}" ;;
-    courses) echo "https://rdap.nic.courses/domain/${domain}" ;;
-    health) echo "https://rdap.nic.health/domain/${domain}" ;;
-    fit) echo "https://rdap.nic.fit/domain/${domain}" ;;
-    music) echo "https://rdap.registryservices.music/rdap/domain/${domain}" ;;
-    shop) echo "https://rdap.gmoregistry.net/rdap/domain/${domain}" ;;
-    ly) echo "https://rdap.nic.ly/domain/${domain}" ;;
-    is) echo "https://rdap.isnic.is/rdap/domain/${domain}" ;;
-    to) echo "https://rdap.tonicregistry.to/rdap/domain/${domain}" ;;
-    in) echo "https://rdap.nixiregistry.in/rdap/domain/${domain}" ;;
-    re) echo "https://rdap.nic.re/domain/${domain}" ;;
-    no) echo "https://rdap.norid.no/domain/${domain}" ;;
-    es) echo "SKIP" ;;  # whois.nic.es requires IP auth — always returns unknown
-    co|it|de|be|at|se|gg|st|pt|my|nu|am) echo "WHOIS" ;;
-    *) echo "https://rdap.org/domain/${domain}" ;;
-  esac
-}
+The tool returns: `{"version":"1","results":{"brainstorm.com":{"status":"available"}},"meta":{"checked":1,"completed":1}}`
 
-check_domain() {
-  local domain="$1" outfile="$2"
-  if ! printf '%s' "$domain" | grep -qE '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$'; then
-    echo "000" > "$outfile"; return
-  fi
-  local url
-  url=$(rdap_url "$domain")
-  if [ "$url" = "SKIP" ]; then
-    echo "SKIP" > "$outfile"
-    return
-  elif [ "$url" = "WHOIS" ]; then
-    local result resp_status
-    result=$(curl -s --max-time 10 -X POST \
-      -H "Content-Type: application/json" \
-      -d "{\"domain\":\"$domain\"}" \
-      https://domain-puppy-proxy.mattjdalley.workers.dev/v1/whois-check)
-    case "$result" in
-      *'"available"'*) resp_status="404" ;;
-      *'"taken"'*)     resp_status="200" ;;
-      *)               resp_status="000" ;;
-    esac
-    echo "$resp_status" > "$outfile"
-  else
-    curl -s -o /dev/null -w "%{http_code}" -L --max-redirs 3 --proto '=https' --proto-redir '=https' --max-time 10 "$url" > "$outfile"
-  fi
-}
+Worker response status values:
+- `"status": "available"` = domain is likely available (✅)
+- `"status": "taken"` = domain is registered (❌)
+- `"status": "skip"` = TLD can't be checked automatically (❓)
+- `"status": "unknown"` = couldn't check (❓)
 
-# Check the single domain
-check_domain "brainstorm.com" "$TMPFILE"
+The tool retries non-definitive results internally — no retry logic needed here.
 
-# Read the result
-STATUS=$(cat "$TMPFILE" 2>/dev/null)
-[ -z "$STATUS" ] && STATUS="000"
+### 3c. Classify Each Result
 
-# Retry once if non-definitive (000 timeout, 429 rate limit, etc.)
-if [ "$STATUS" != "200" ] && [ "$STATUS" != "404" ]; then
-  sleep 10
-  check_domain "brainstorm.com" "$TMPFILE"
-  STATUS=$(cat "$TMPFILE" 2>/dev/null)
-  [ -z "$STATUS" ] && STATUS="000"
-fi
+For each domain checked, classify it based on the tool's `status` field:
 
-# Cleanup
-rm -f "$TMPFILE"
-```
+| Worker Status | Classification | Symbol |
+|---------------|---------------|--------|
+| `"available"` | Available | ✅ |
+| `"taken"` | Taken | ❌ |
+| `"skip"` | Unreliable TLD (.es) | ❓ |
+| `"unknown"` or error | Couldn't check | ❓ |
 
-### 3c. Retry Non-Definitive Results
-
-The retry is built into the template above — if the first check returns anything other than 200 or 404, it waits 10 seconds and retries once. If the retry also fails, classify as "couldn't check."
-
-### 3d. Classify Each Result
-
-For each domain checked (after retry), classify it as one of three states:
-
-| HTTP Status | Classification | Symbol |
-|-------------|---------------|--------|
-| 404 | Available | ✅ |
-| 200 | Taken | ❌ |
-| SKIP | Unreliable TLD (.es) | ❓ |
-| Anything else (000, 429, timeout, 5xx, etc.) | Couldn't check | ❓ |
-
-### 3e. Build the Affiliate Links
+### 3d. Build the Affiliate Links
 
 For each domain, determine the correct registrar using the routing table below, then generate the appropriate link.
 
@@ -253,7 +136,7 @@ For each domain, determine the correct registrar using the routing table below, 
 
 ## Step 4: Present Results
 
-Present the single domain result. Use the correct registrar link per the routing table in Step 3e.
+Present the single domain result. Use the correct registrar link per the routing table in Step 3d.
 
 ### If the domain is AVAILABLE:
 
@@ -315,9 +198,9 @@ Do NOT auto-open the browser for inconclusive results — the user may not want 
 
 ## Step 4b: Track B — Alternative Domains
 
-Run Track B only when the user explicitly requests alternatives (e.g., chooses "Brainstorm alternatives" from the options menu in Step 4). Generate and check alternatives using the 4 strategies below. Run all RDAP checks in parallel (using the fallback chain from `references/lookup-reference.md` for ccTLDs). Present only available domains, grouped by strategy.
+Run Track B only when the user explicitly requests alternatives (e.g., chooses "Brainstorm alternatives" from the options menu in Step 4). Generate and check alternatives using the 4 strategies below. Check all alternatives via the `mcp__domain_puppy__check` tool (batched, ≤20 per call). The tool handles registry routing internally. Present only available domains, grouped by strategy.
 
-**IMPORTANT — Track B bash timeout:** Track B checks can run 30–50+ curl requests. Always set the bash timeout to at least 5 minutes (300000ms) for Track B commands. Use `--max-time 8` per curl to allow time for registry responses and WHOIS proxy lookups.
+**Track B makes multiple MCP tool calls. Each call has a built-in 30-second timeout. No bash timeout needed for the domain checks themselves, but set bash timeout to 300000ms if Playwright steps are involved.**
 
 ### Strategy 1: Close Variations (highest relevance — run in parallel)
 
@@ -332,7 +215,7 @@ Generate and check close variations of the base name:
 - Hyphenated: `{base-hyphenated}.com` — always flag hyphens: "(Note: hyphens generally hurt branding and memorability)"
 - Abbreviation: truncate to a recognizable short form
 
-Check each variation against `.com` and `.io` at minimum. Run up to 10 concurrent checks per batch, with a 5-second `sleep` between batches (some registries rate-limit after ~20 rapid requests).
+Check each variation against `.com` and `.io` at minimum. The tool handles rate limiting internally — just batch domains ≤20 per call.
 
 ### Strategy 2: Synonym & Thesaurus Exploration
 
@@ -360,7 +243,7 @@ Check `.com` + 1–2 relevant TLDs for each.
 
 ### Strategy 4: Domain Hacks
 
-Generate domain hacks where the TLD completes the name or phrase. Use real ccTLDs (see the Domain Hack Catalog in `references/tld-catalog.md`). Check each using the full fallback chain (RDAP → DoH) since many ccTLDs don't support RDAP.
+Generate domain hacks where the TLD completes the name or phrase. Use real ccTLDs (see the Domain Hack Catalog in `references/tld-catalog.md`). Check each via the `mcp__domain_puppy__check` tool. The tool handles ccTLD-specific fallbacks internally.
 
 Examples for "brainstorm":
 - `brainstor.me` (`.me`)
@@ -371,120 +254,17 @@ Always verify a ccTLD exists and accepts registrations before suggesting it.
 
 ### Track B Execution Template
 
-**Use `--max-time 8` and set bash timeout to 300000ms (5 minutes). Batch ≤10 concurrent, `sleep 5` between batches. Retry failures after a 10-second wait.**
+**Set bash timeout to 300000ms (5 minutes) for Playwright steps. Domain checks use MCP tool calls — no bash needed.**
 
-```bash
-WORK_DIR=$(mktemp -d)
-trap 'rm -rf "$WORK_DIR"' EXIT
-
-# --- Domain availability routing (v1.7.0) ---
-rdap_url() {
-  local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
-  local tld="${domain##*.}"
-  case "$tld" in
-    com) echo "https://rdap.verisign.com/com/v1/domain/${domain}" ;;
-    net) echo "https://rdap.verisign.com/net/v1/domain/${domain}" ;;
-    cc) echo "https://tld-rdap.verisign.com/cc/v1/domain/${domain}" ;;
-    dev|app) echo "https://pubapi.registry.google/rdap/domain/${domain}" ;;
-    ai|io|me|sh|tools|codes|run|studio|gallery|media|chat|coffee|cafe|ventures|supply|agency|capital|community|social|group|team|market|deals|academy|school|training|care|clinic|band|money|finance|fund|tax|investments)
-      echo "https://rdap.identitydigital.services/rdap/domain/${domain}" ;;
-    xyz|build|art|game|quest|lol|inc|store|audio|fm)
-      echo "https://rdap.centralnic.com/${tld}/domain/${domain}" ;;
-    design) echo "https://rdap.nic.design/domain/${domain}" ;;
-    ink) echo "https://rdap.nic.ink/domain/${domain}" ;;
-    menu) echo "https://rdap.nic.menu/domain/${domain}" ;;
-    club) echo "https://rdap.nic.club/domain/${domain}" ;;
-    courses) echo "https://rdap.nic.courses/domain/${domain}" ;;
-    health) echo "https://rdap.nic.health/domain/${domain}" ;;
-    fit) echo "https://rdap.nic.fit/domain/${domain}" ;;
-    music) echo "https://rdap.registryservices.music/rdap/domain/${domain}" ;;
-    shop) echo "https://rdap.gmoregistry.net/rdap/domain/${domain}" ;;
-    ly) echo "https://rdap.nic.ly/domain/${domain}" ;;
-    is) echo "https://rdap.isnic.is/rdap/domain/${domain}" ;;
-    to) echo "https://rdap.tonicregistry.to/rdap/domain/${domain}" ;;
-    in) echo "https://rdap.nixiregistry.in/rdap/domain/${domain}" ;;
-    re) echo "https://rdap.nic.re/domain/${domain}" ;;
-    no) echo "https://rdap.norid.no/domain/${domain}" ;;
-    es) echo "SKIP" ;;  # whois.nic.es requires IP auth — always returns unknown
-    co|it|de|be|at|se|gg|st|pt|my|nu|am) echo "WHOIS" ;;
-    *) echo "https://rdap.org/domain/${domain}" ;;
-  esac
-}
-
-check_domain() {
-  local domain="$1" outfile="$2"
-  if ! printf '%s' "$domain" | grep -qE '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$'; then
-    echo "000" > "$outfile"; return
-  fi
-  local url
-  url=$(rdap_url "$domain")
-  if [ "$url" = "SKIP" ]; then
-    echo "SKIP" > "$outfile"
-    return
-  elif [ "$url" = "WHOIS" ]; then
-    local result resp_status
-    result=$(curl -s --max-time 10 -X POST \
-      -H "Content-Type: application/json" \
-      -d "{\"domain\":\"$domain\"}" \
-      https://domain-puppy-proxy.mattjdalley.workers.dev/v1/whois-check)
-    case "$result" in
-      *'"available"'*) resp_status="404" ;;
-      *'"taken"'*)     resp_status="200" ;;
-      *)               resp_status="000" ;;
-    esac
-    echo "$resp_status" > "$outfile"
-  else
-    curl -s -o /dev/null -w "%{http_code}" -L --max-redirs 3 --proto '=https' --proto-redir '=https' --max-time 8 "$url" > "$outfile"
-  fi
-}
-
-# --- Batch 1: Close variations + synonyms (10 max) ---
-check_domain "getbrainstorm.com"  "$WORK_DIR/getbrainstorm.com"  &
-check_domain "trybrainstorm.com"  "$WORK_DIR/trybrainstorm.com"  &
-check_domain "brainstormhq.com"   "$WORK_DIR/brainstormhq.com"   &
-check_domain "brainstormlabs.com" "$WORK_DIR/brainstormlabs.com" &
-check_domain "brainstormapp.com"  "$WORK_DIR/brainstormapp.com"  &
-check_domain "ideate.com"         "$WORK_DIR/ideate.com"         &
-check_domain "ideate.io"          "$WORK_DIR/ideate.io"          &
-check_domain "thinkstorm.com"     "$WORK_DIR/thinkstorm.com"     &
-check_domain "brainwave.io"       "$WORK_DIR/brainwave.io"       &
-check_domain "ideaforge.dev"      "$WORK_DIR/ideaforge.dev"      &
-wait
-sleep 5
-
-# --- Batch 2: Creative + domain hacks ---
-check_domain "mindspark.ai"   "$WORK_DIR/mindspark.ai"   &
-check_domain "neuronflow.com" "$WORK_DIR/neuronflow.com" &
-check_domain "brainstor.me"   "$WORK_DIR/brainstor.me"   &
-check_domain "brainstorm.is"  "$WORK_DIR/brainstorm.is"  &
-wait
-
-# --- Retry: collect non-definitive results, wait 10s, re-check ---
-RETRYFILE=$(mktemp -p "$WORK_DIR")
-for F in "$WORK_DIR"/*; do
-  D=$(basename "$F"); STATUS=$(cat "$F")
-  if [ "$STATUS" != "200" ] && [ "$STATUS" != "404" ]; then
-    echo "$D" >> "$RETRYFILE"
-  fi
-done
-if [ -s "$RETRYFILE" ]; then
-  sleep 10
-  BATCH=0
-  while IFS= read -r D; do
-    check_domain "$D" "$WORK_DIR/$D" &
-    BATCH=$((BATCH+1))
-    if [ $BATCH -ge 5 ]; then
-      wait; sleep 3; BATCH=0
-    fi
-  done < "$RETRYFILE"
-  wait
-fi
-rm -f "$RETRYFILE"
-
-# Read all results (404 = available, 200 = taken, else = ❓)
-# Cleanup
-rm -rf "$WORK_DIR"
 ```
+# Track B: check alternatives in batches of ≤20
+mcp__domain_puppy__check(domains=["getbrainstorm.com","trybrainstorm.com","brainstormhq.com","brainstormlabs.com","brainstormapp.com","ideate.com","ideate.io","thinkstorm.com","brainwave.io","ideaforge.dev","mindspark.ai","neuronflow.com","brainstor.me","brainstorm.is"])
+
+# If more than 20 domains, make additional calls:
+mcp__domain_puppy__check(domains=["domain21.com","domain22.dev",...up to 20])
+```
+
+Parse each response JSON. The `results` object maps domain → `{"status": "available"|"taken"|"skip"|"unknown"}`. The tool handles all retries internally.
 
 ### Track B Output Format
 
@@ -529,9 +309,13 @@ When the user picks a domain from the list, run `open "{registrar search URL for
 
 Run the TLD scan only when the user explicitly requests it (e.g., chooses "Scan other TLDs" from the options menu in Step 4).
 
-Check the standard TLD matrix — `.com`, `.dev`, `.io`, `.ai`, `.co`, `.app`, `.xyz`, `.me`, `.sh`, `.cc` — **excluding the TLD already checked in Step 3b**. Run all checks in parallel using the existing template pattern (same `rdap_url()` and `check_domain()` functions, background processes with `wait`).
+Check the standard TLD matrix — `.com`, `.dev`, `.io`, `.ai`, `.co`, `.app`, `.xyz`, `.me`, `.sh`, `.cc` — **excluding the TLD already checked in Step 3b** — with a single tool call:
 
-After retry (same retry logic as Step 3c, applied per-domain), present results grouped by status:
+```
+mcp__domain_puppy__check(domains=["{base}.com","{base}.dev","{base}.io","{base}.ai","{base}.co","{base}.app","{base}.xyz","{base}.me","{base}.sh","{base}.cc"])
+```
+
+Parse the `results` object and present results grouped by status:
 
 ```
 ## TLD Scan for {base}
@@ -558,7 +342,7 @@ I couldn't verify these automatically — you can check them yourself:
 > Availability is checked in real-time but can change at any moment. Confirm at checkout before purchasing.
 ```
 
-Group by Available first, then Taken, then Couldn't Check. Omit any group that has no entries. Use the correct registrar link for each TLD per the routing table in Step 3e.
+Group by Available first, then Taken, then Couldn't Check. Omit any group that has no entries. Use the correct registrar link for each TLD per the routing table in Step 3d.
 
 When the user picks a domain from the list, run `open "{registrar search URL for domain}"` to open the registration page in their browser.
 
@@ -589,12 +373,12 @@ Keep it to one short line. Don't over-explain.
 ## General Behavior Notes
 
 - **Opening links in the browser:** Use `open "url"` (macOS) to open registration/purchase pages in the user's default browser. **Always ask the user before opening any link — no exceptions.** For **single-domain results** (one domain checked and it's available, or a premium/aftermarket result), offer to open the registration link (e.g., "Want me to open the registration page?"). For **multi-domain results** (Track B, TLD scan, brainstorm waves), list the results and ask which one they'd like opened. **NEVER open multiple browser tabs at once** unless the user explicitly asks you to (e.g., "open all of them"). One tab at a time, always.
-- Be conversational and direct. Don't narrate what you're doing step-by-step ("Now I will run the curl commands..."). Just do it and present the results cleanly.
+- Be conversational and direct. Don't narrate what you're doing step-by-step ("Now I will run the tool calls..."). Just do it and present the results cleanly.
 - Use markdown formatting for results — tables, headers, and links render well in Claude Code.
-- If the user provides multiple domain names at once, check them all. Run all RDAP lookups in a single parallel batch (all background processes, one `wait`). Present results using the TLD Scan format from Step 4c (grouped by Available / Taken / Couldn't Check). Follow the multi-domain link-opening rule: list all results and ask which one they'd like opened in their browser.
-- Lowercase all domains before checking. RDAP is case-insensitive but keep output lowercase for consistency.
+- If the user provides multiple domain names at once, check them all. Call `mcp__domain_puppy__check` with all domains in a single batch (or batches of ≤20). Present results using the TLD Scan format from Step 4c (grouped by Available / Taken / Couldn't Check). Follow the multi-domain link-opening rule: list all results and ask which one they'd like opened in their browser.
+- Lowercase all domains before checking. Lookups are case-insensitive but keep output lowercase for consistency.
 - If the user provides a domain with an unusual TLD (e.g., brainstorm.gg), check that specific domain only.
-- Do not hallucinate availability. Always check via `curl` before reporting status. If a check fails, report ❓ honestly.
+- Do not hallucinate availability. Always check via the availability tool before reporting status. If a check fails, report ❓ honestly.
 - For brainstorm mode (Flow 2), see Step 7 (7a–7f) below.
 - If the user declines to brainstorm AND declines to check a specific name, give them a graceful exit: "No problem! Just ask me about domains whenever you need help finding one."
 
@@ -604,7 +388,7 @@ Keep it to one short line. Don't over-explain.
 
 When the user says they want to brainstorm (or indicates they don't have a name in mind), enter Brainstorm Mode. This is a multi-wave exploration process. Keep the energy creative and fun — you're a naming partner, not a search engine.
 
-**Premium search is NEVER triggered during brainstorm mode.** Only RDAP/DoH checks are used. When dozens of names are checked in bulk, offering a premium search on each taken domain would burn through checks instantly. Premium search is reserved exclusively for specific taken domains the user explicitly asked about (Flow 1 / Step 4).
+**Premium search is NEVER triggered during brainstorm mode.** Only `mcp__domain_puppy__check` tool calls are used. When dozens of names are checked in bulk, offering a premium search on each taken domain would burn through checks instantly. Premium search is reserved exclusively for specific taken domains the user explicitly asked about (Flow 1 / Step 4).
 
 ---
 
@@ -664,140 +448,27 @@ Mix techniques across categories. The goal is a genuinely diverse set — if wav
 
 ### Step 7d: Bulk Availability Check
 
-Check ALL generated names in parallel using RDAP. This means **50–100+ checks per wave** — batch them to avoid overwhelming the system.
-
-**IMPORTANT — bash timeout:** Bulk checks can run 50–100+ curl requests across multiple batches. Always set the bash timeout to at least 5 minutes (300000ms). Use `--max-time 8` per curl to allow time for registry responses and WHOIS proxy lookups.
-
-**Batching strategy:** Run checks in groups of **10** concurrent processes max, with a **5-second `sleep` between batches** (some registries rate-limit after ~20 rapid requests). Wait for each batch to finish before starting the next.
+**IMPORTANT — Brainstorm checks:** Bulk checks make multiple tool calls. Split into batches of ≤20 (the tool's max per request).
 
 For each name:
 - Standard dictionary names: check `.com` + 2–3 relevant alternatives (e.g., `.dev`, `.io`, `.ai`, `.app`, `.co`)
-- Domain hacks: check only the specific TLD that completes the hack (e.g., `brainstor.me` checks `.me`) — use the full fallback chain (RDAP → DoH) since many ccTLDs don't support RDAP. See `references/lookup-reference.md` for fallback details. **Exception:** `.er` and `.al` are non-registrable — do NOT pass them to `check_domain()`. Instead, add them directly to the output with the specialty registrar disclaimer (see Step 3e).
-- Thematic TLD plays: check the exact TLD in the name — use the fallback chain for any ccTLD
+- Domain hacks: check only the specific TLD that completes the hack (e.g., `brainstor.me` checks `.me`). **Exception:** `.er` and `.al` are non-registrable — add them directly to the output with the specialty registrar disclaimer (see Step 3d), do NOT include in the tool call.
+- Thematic TLD plays: check the exact TLD in the name
 
 **Batch template (adapt for actual names):**
 
-```bash
-WORK_DIR=$(mktemp -d)
-trap 'rm -rf "$WORK_DIR"' EXIT
+```
+# Brainstorm bulk check — split into batches of 20
+# Batch 1 (domains 1-20)
+mcp__domain_puppy__check(domains=["vexapp.com","vexapp.dev","zolt.io","zolt.dev","gath.er","lumora.com","lumora.io","codecraft.com","codecraft.dev","novari.co","zentrik.com","zentrik.io","lumora.ai","codecraft.io","novari.io","vexapp.io","zolt.ai","zolt.co","lumora.dev","novari.dev"])
 
-# --- Domain availability routing (v1.7.0) ---
-rdap_url() {
-  local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
-  local tld="${domain##*.}"
-  case "$tld" in
-    com) echo "https://rdap.verisign.com/com/v1/domain/${domain}" ;;
-    net) echo "https://rdap.verisign.com/net/v1/domain/${domain}" ;;
-    cc) echo "https://tld-rdap.verisign.com/cc/v1/domain/${domain}" ;;
-    dev|app) echo "https://pubapi.registry.google/rdap/domain/${domain}" ;;
-    ai|io|me|sh|tools|codes|run|studio|gallery|media|chat|coffee|cafe|ventures|supply|agency|capital|community|social|group|team|market|deals|academy|school|training|care|clinic|band|money|finance|fund|tax|investments)
-      echo "https://rdap.identitydigital.services/rdap/domain/${domain}" ;;
-    xyz|build|art|game|quest|lol|inc|store|audio|fm)
-      echo "https://rdap.centralnic.com/${tld}/domain/${domain}" ;;
-    design) echo "https://rdap.nic.design/domain/${domain}" ;;
-    ink) echo "https://rdap.nic.ink/domain/${domain}" ;;
-    menu) echo "https://rdap.nic.menu/domain/${domain}" ;;
-    club) echo "https://rdap.nic.club/domain/${domain}" ;;
-    courses) echo "https://rdap.nic.courses/domain/${domain}" ;;
-    health) echo "https://rdap.nic.health/domain/${domain}" ;;
-    fit) echo "https://rdap.nic.fit/domain/${domain}" ;;
-    music) echo "https://rdap.registryservices.music/rdap/domain/${domain}" ;;
-    shop) echo "https://rdap.gmoregistry.net/rdap/domain/${domain}" ;;
-    ly) echo "https://rdap.nic.ly/domain/${domain}" ;;
-    is) echo "https://rdap.isnic.is/rdap/domain/${domain}" ;;
-    to) echo "https://rdap.tonicregistry.to/rdap/domain/${domain}" ;;
-    in) echo "https://rdap.nixiregistry.in/rdap/domain/${domain}" ;;
-    re) echo "https://rdap.nic.re/domain/${domain}" ;;
-    no) echo "https://rdap.norid.no/domain/${domain}" ;;
-    es) echo "SKIP" ;;  # whois.nic.es requires IP auth — always returns unknown
-    co|it|de|be|at|se|gg|st|pt|my|nu|am) echo "WHOIS" ;;
-    *) echo "https://rdap.org/domain/${domain}" ;;
-  esac
-}
+# Batch 2 (domains 21-40)
+mcp__domain_puppy__check(domains=["zentrik.co","zentrik.ai",...up to 20])
 
-check_domain() {
-  local domain="$1" outfile="$2"
-  if ! printf '%s' "$domain" | grep -qE '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$'; then
-    echo "000" > "$outfile"; return
-  fi
-  local url
-  url=$(rdap_url "$domain")
-  if [ "$url" = "SKIP" ]; then
-    echo "SKIP" > "$outfile"
-    return
-  elif [ "$url" = "WHOIS" ]; then
-    local result resp_status
-    result=$(curl -s --max-time 10 -X POST \
-      -H "Content-Type: application/json" \
-      -d "{\"domain\":\"$domain\"}" \
-      https://domain-puppy-proxy.mattjdalley.workers.dev/v1/whois-check)
-    case "$result" in
-      *'"available"'*) resp_status="404" ;;
-      *'"taken"'*)     resp_status="200" ;;
-      *)               resp_status="000" ;;
-    esac
-    echo "$resp_status" > "$outfile"
-  else
-    curl -s -o /dev/null -w "%{http_code}" -L --max-redirs 3 --proto '=https' --proto-redir '=https' --max-time 8 "$url" > "$outfile"
-  fi
-}
-
-# Batch 1 (domains 1-10)
-check_domain "vexapp.com"    "$WORK_DIR/vexapp.com"    &
-check_domain "vexapp.dev"    "$WORK_DIR/vexapp.dev"    &
-check_domain "zolt.io"       "$WORK_DIR/zolt.io"       &
-check_domain "zolt.dev"      "$WORK_DIR/zolt.dev"      &
-check_domain "gath.er"       "$WORK_DIR/gath.er"       &
-check_domain "lumora.com"    "$WORK_DIR/lumora.com"    &
-check_domain "lumora.io"     "$WORK_DIR/lumora.io"     &
-check_domain "codecraft.com" "$WORK_DIR/codecraft.com" &
-check_domain "codecraft.dev" "$WORK_DIR/codecraft.dev" &
-check_domain "novari.co"     "$WORK_DIR/novari.co"     &
-wait
-sleep 5
-
-# Batch 2 (domains 11-20)
-check_domain "zentrik.com"  "$WORK_DIR/zentrik.com"  &
-check_domain "zentrik.io"   "$WORK_DIR/zentrik.io"   &
-# ... (up to 10 total in this batch)
-wait
-sleep 5
-
-# Continue batching: ≤10 per batch, sleep 5 between each, until all names are checked
-
-# --- Retry: collect non-definitive results, wait 10s, re-check in batches of 5 ---
-RETRYFILE=$(mktemp -p "$WORK_DIR")
-for F in "$WORK_DIR"/*; do
-  D=$(basename "$F"); STATUS=$(cat "$F")
-  if [ "$STATUS" != "200" ] && [ "$STATUS" != "404" ]; then
-    echo "$D" >> "$RETRYFILE"
-  fi
-done
-if [ -s "$RETRYFILE" ]; then
-  sleep 10
-  BATCH=0
-  while IFS= read -r D; do
-    check_domain "$D" "$WORK_DIR/$D" &
-    BATCH=$((BATCH+1))
-    if [ $BATCH -ge 5 ]; then
-      wait; sleep 3; BATCH=0
-    fi
-  done < "$RETRYFILE"
-  wait
-fi
-rm -f "$RETRYFILE"
-
-# Read all results
-STATUS_VEXAPP_COM=$(cat "$WORK_DIR/vexapp.com")
-STATUS_VEXAPP_DEV=$(cat "$WORK_DIR/vexapp.dev")
-STATUS_ZOLT_IO=$(cat "$WORK_DIR/zolt.io")
-# ... etc.
-
-# Cleanup
-rm -rf "$WORK_DIR"
+# Continue batching: ≤20 per batch until all names are checked
 ```
 
-Scale the number of batches to cover all checks. Always `wait` + `sleep 5` after each batch before starting the next. The retry pass at the end catches any rate-limited or timed-out domains.
+Parse each response JSON. The `results` object maps domain → `{"status": "available"|"taken"|"skip"|"unknown"}`. The tool handles all registry routing and retries internally.
 
 ---
 
@@ -835,7 +506,7 @@ You can purchase any of these domains via the URLs below. Want me to open one in
 12 of 34 checked are available. Anything catching your eye? Tell me what direction you like and I'll dig deeper.
 ```
 
-Use the correct registrar link for each domain per the routing table in Step 3e. The examples above happen to use name.com TLDs — for Dynadot TLDs, use the Dynadot URL instead.
+Use the correct registrar link for each domain per the routing table in Step 3d. The examples above happen to use name.com TLDs — for Dynadot TLDs, use the Dynadot URL instead.
 
 Notable near-misses (show sparingly, only if genuinely worth mentioning):
 > codeship.com is taken, but codeship.dev is available ✅
@@ -872,7 +543,7 @@ Premium search checks whether a taken domain is available for purchase on the af
 Offer premium search **only** when ALL of the following are true:
 
 - The domain being discussed was explicitly requested by the user (not generated during a brainstorm wave)
-- The RDAP check confirmed the domain is **taken** (HTTP 200)
+- The availability check confirmed the domain is **taken** (`status: "taken"`)
 - The user is in Flow 1 (Step 3), not brainstorm mode (Step 7)
 
 Do not trigger premium search in brainstorm mode — only for explicitly requested domains.
@@ -893,23 +564,20 @@ Do not trigger premium search in brainstorm mode — only for explicitly request
 
 ### Premium Check Call
 
-```bash
+```
 # Replace DOMAIN with the actual domain being checked (e.g., brainstorm.com)
-PREMIUM_RESULT=$(curl -s --max-time 10 -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"domain":"DOMAIN"}' \
-  https://domain-puppy-proxy.mattjdalley.workers.dev/v1/premium-check)
+mcp__domain_puppy__premium_check(domain="DOMAIN")
 
-HTTP_STATUS=$(printf '%s' "$PREMIUM_RESULT" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
-REMAINING=$(printf '%s' "$PREMIUM_RESULT" | grep -o '"remainingChecks":[0-9]*' | cut -d: -f2)
+# Response contains: status, remainingChecks
+# Or error: { error: "quota_exceeded", remainingChecks: 0 }
 ```
 
 ```
 ├── 200 + result data + remainingChecks → Show result (Step 8 result display)
 │
-├── 429 quota_exceeded → Friendly options (see Quota Exceeded Handler below)
+├── error: quota_exceeded → Friendly options (see Quota Exceeded Handler below)
 │
-└── 503 service_unavailable → See Transparent Degradation section below
+└── error: worker_unavailable → See Transparent Degradation section below
 ```
 
 ---
@@ -954,11 +622,11 @@ Present a friendly message — no alarm language ("error", "exceeded", "limit").
 **After the user chooses (Playwright detected):**
 
 - **Option 1 (registrar check):** Run Step 9 (Browser-Based Price Check) for the domain.
-- **Option 2 (manual):** Show the registrar URL using the routing table from Step 3e. Ask if they'd like you to open it.
+- **Option 2 (manual):** Show the registrar URL using the routing table from Step 3d. Ask if they'd like you to open it.
 
 **After the user chooses (no Playwright):**
 
-- Show the registrar URL using the routing table from Step 3e. Ask if they'd like you to open it.
+- Show the registrar URL using the routing table from Step 3d. Ask if they'd like you to open it.
 
 **Session memory:** Remember the user's choice for the rest of this conversation. If they hit the quota again on a different domain in the same session, automatically use their previous choice without re-asking. If they chose the Playwright path and already gave consent (see Step 9), run it directly for subsequent domains.
 
@@ -1026,6 +694,22 @@ Ask the user if they'd like you to open the link. Do not auto-open. Do not retry
 
 Never pretend a feature doesn't exist after the user has seen it in use during the current session.
 
+**Worker unavailable (availability checks):**
+
+If the `/v1/check` endpoint returns HTTP 5xx, times out, or returns an empty/malformed response, do not retry. Instead, show the user manual check links:
+
+> "Availability checking is temporarily unavailable. Here are manual check links for your domains:"
+
+Then list each domain with its registrar URL from the routing table in Step 3d. These are static display links — no fetch needed. Ask if the user wants you to open any of them.
+
+**MCP server not running (tool call fails with connection error):**
+
+If domain check tool calls return an MCP connection error rather than a worker error, the MCP server may not be running. Show:
+
+> "Domain checking is temporarily unavailable — the MCP server may not be configured. Check your Claude MCP settings or ask your admin to verify the domain-puppy MCP server is running."
+
+Then offer manual check links using the registrar routing table in Step 3d.
+
 ---
 
 ## Step 9: Browser-Based Price Check (Playwright Fallback)
@@ -1051,7 +735,7 @@ Write Playwright code as you would for any browser automation task, but **restri
 - `www.dynadot.com`
 - `sedo.com`
 
-Before constructing any URL, validate the domain with the same regex used in `check_domain()`. Never navigate to a URL that does not match one of the three allowed registrar hosts.
+Before constructing any URL, validate the domain format (alphanumeric, hyphens, valid TLD). Never navigate to a URL that does not match one of the three allowed registrar hosts.
 
 **Goal:** Visit the registrar's domain search page, wait for results to load, extract whether the domain is available/for-sale and at what price.
 
@@ -1082,7 +766,7 @@ For `.ly`, `.is`, `.er`, and `.al`, name.com and Dynadot don't carry these TLDs.
 
 Detailed lookup tables are in `references/` — consult them as needed:
 
-- **`references/rdap-endpoints.md`** — Full RDAP endpoint map for all 77 TLDs, canonical `rdap_url()` function, WHOIS server mapping, fallback chain diagram
-- **`references/lookup-reference.md`** — RDAP command and status codes, DoH fallback via curl, full fallback chain diagram, graceful degradation threshold and response format
+- **`references/rdap-endpoints.md`** — Full RDAP endpoint map for all 77 TLDs, WHOIS server mapping, routing table (now implemented in the worker)
+- **`references/lookup-reference.md`** — Availability check status codes, fallback chain diagram, graceful degradation threshold and response format
 - **`references/tld-catalog.md`** — Thematic TLD pairings by project type (12 categories), domain hack catalog with 22 ccTLDs and curated examples
 - **`references/registrar-routing.md`** — TLD-to-registrar routing table. Determines whether buy links go to name.com or Dynadot based on TLD. **Always consult this table when generating registration links.**
