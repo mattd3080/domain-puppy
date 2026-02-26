@@ -1,7 +1,7 @@
 ---
 name: domain-puppy
 description: This skill should be used when the user asks to "check if a domain is available", "find a domain name", "brainstorm domain names", "is X.com taken", "search for domains", or is trying to name a product, app, or startup and needs domain options. Also activate when the user mentions needing a domain or asks about aftermarket domains listed for sale.
-version: 1.6.12
+version: 1.7.0
 allowed-tools: Bash
 metadata: {"openclaw": {"requires": {"bins": ["curl"]}, "homepage": "https://github.com/mattd3080/domain-puppy"}}
 ---
@@ -21,7 +21,7 @@ You are Domain Puppy, a helpful domain-hunting assistant. Follow these instructi
 On first activation in a session, check if a newer version is available. Do not block or delay the user's request — run this in the background alongside Step 1.
 
 ```bash
-LOCAL_VERSION="1.6.12"
+LOCAL_VERSION="1.7.0"
 REMOTE_VERSION=$(curl -s --max-time 3 "https://domainpuppy.com/api/version" | grep -o '"version":"[^"]*"' | grep -o '[0-9][^"]*')
 if ! printf '%s' "$REMOTE_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then REMOTE_VERSION=""; fi
 version_gt() {
@@ -58,16 +58,10 @@ Keep these short (one line) and always at the end of the response, after the act
 
 **When the user says "yes", "update", "upgrade", or similar:** Show the update instructions — **do not execute any install command**:
 
-> To update Domain Puppy, run one of these in your terminal:
+> To update Domain Puppy, run this in your terminal:
 >
 > ```
 > npx skills add mattd3080/domain-puppy
-> ```
->
-> Or if you don't have Node.js:
->
-> ```
-> curl -sL domainpuppy.com/install | sh
 > ```
 >
 > Then start a new conversation to use the updated version.
@@ -132,7 +126,7 @@ TMPFILE=""
 trap 'rm -f "$TMPFILE"' EXIT
 TMPFILE=$(mktemp)
 
-# --- Domain availability routing (v1.6.12) ---
+# --- Domain availability routing (v1.7.0) ---
 rdap_url() {
   local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   local tld="${domain##*.}"
@@ -383,7 +377,7 @@ Always verify a ccTLD exists and accepts registrations before suggesting it.
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "$WORK_DIR"' EXIT
 
-# --- Domain availability routing (v1.6.12) ---
+# --- Domain availability routing (v1.7.0) ---
 rdap_url() {
   local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   local tld="${domain##*.}"
@@ -687,7 +681,7 @@ For each name:
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "$WORK_DIR"' EXIT
 
-# --- Domain availability routing (v1.6.12) ---
+# --- Domain availability routing (v1.7.0) ---
 rdap_url() {
   local domain=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   local tld="${domain##*.}"
@@ -869,7 +863,7 @@ Continue until the user picks a name, asks to stop, or (for Quick/Standard) the 
 
 ## Step 8: Premium Search Integration
 
-Premium search checks whether a taken domain is available for purchase on the aftermarket or is listed as a registry premium. It uses a paid API and is quota-limited for users who have not supplied their own API key.
+Premium search checks whether a taken domain is available for purchase on the aftermarket or is listed as a registry premium. It uses a paid API with 5 free checks per month.
 
 ---
 
@@ -897,44 +891,26 @@ Do not trigger premium search in brainstorm mode — only for explicitly request
 
 ---
 
-### API Key Decision Flow
+### Premium Check Call
 
-```
-Has the user configured their own Fastly API token?
-(Check ~/.claude/domain-puppy/config.json — see Step 9)
+```bash
+# Replace DOMAIN with the actual domain being checked (e.g., brainstorm.com)
+PREMIUM_RESULT=$(curl -s --max-time 10 -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"domain":"DOMAIN"}' \
+  https://domain-puppy-proxy.mattjdalley.workers.dev/v1/premium-check)
 
-├── YES → Call Fastly Domain Research API directly with their token (unlimited checks)
-│
-│   FASTLY_TOKEN=$(grep -oE '"fastlyApiToken"[[:space:]]*:[[:space:]]*"[^"]*"' "$HOME/.claude/domain-puppy/config.json" 2>/dev/null | cut -d'"' -f4)
-│
-│   # Replace DOMAIN with the actual domain being checked (e.g., brainstorm.com)
-│   PREMIUM_RESULT=$(curl -s --max-time 10 \
-│     --config <(printf 'header = "Fastly-Key: %s"\n' "$FASTLY_TOKEN") \
-│     "https://api.domainr.com/v2/status?domain=DOMAIN")
-│
-│   On 401/403: "Your Fastly API token returned an error — it may have expired
-│   or been revoked. Check your Fastly dashboard."
-│   Do NOT display the raw error response.
-│
-└── NO → Call the Domain Puppy proxy (IP-based quota)
-
-    # Replace DOMAIN with the actual domain being checked (e.g., brainstorm.com)
-    PREMIUM_RESULT=$(curl -s --max-time 10 -X POST \
-      -H "Content-Type: application/json" \
-      -d '{"domain":"DOMAIN"}' \
-      https://domain-puppy-proxy.mattjdalley.workers.dev/v1/premium-check)
-
-    HTTP_STATUS=$(printf '%s' "$PREMIUM_RESULT" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
-    REMAINING=$(printf '%s' "$PREMIUM_RESULT" | grep -o '"remainingChecks":[0-9]*' | cut -d: -f2)
-
-    ├── 200 + result data + remainingChecks → Show result (Step 8 result display)
-    │
-    ├── 429 quota_exceeded → Friendly options (see Quota Exceeded Handler below)
-    │
-    └── 503 service_unavailable → See Transparent Degradation section below
+HTTP_STATUS=$(printf '%s' "$PREMIUM_RESULT" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
+REMAINING=$(printf '%s' "$PREMIUM_RESULT" | grep -o '"remainingChecks":[0-9]*' | cut -d: -f2)
 ```
 
-Always use `-s` on curl to suppress output that might contain the key. Never log or display the key in any form.
+```
+├── 200 + result data + remainingChecks → Show result (Step 8 result display)
+│
+├── 429 quota_exceeded → Friendly options (see Quota Exceeded Handler below)
+│
+└── 503 service_unavailable → See Transparent Degradation section below
+```
 
 ---
 
@@ -956,7 +932,7 @@ else
 fi
 ```
 
-Step 10 discovers the module path on its own — you do not need to carry any value from this detection step.
+Step 9 discovers the module path on its own — you do not need to carry any value from this detection step.
 
 Present a friendly message — no alarm language ("error", "exceeded", "limit"). The options depend on the result above.
 
@@ -964,35 +940,27 @@ Present a friendly message — no alarm language ("error", "exceeded", "limit").
 
 > Your free premium searches for this month are used up. Here's what we can do:
 >
-> 1. **Your Playwright installation** — I noticed you have Playwright installed. You can use it to check the registrar's pricing page directly (takes a few seconds)
-> 2. **Set up a free Fastly API key** — unlimited premium checks, I can walk you through it
-> 3. **Check manually** — I'll open the registrar page in your browser
+> 1. **Your Playwright installation** — I noticed you have Playwright installed. I can use it to check the registrar's pricing page directly (takes a few seconds)
+> 2. **Check manually** — I'll show you a direct link to the registrar page
 >
 > Which would you prefer?
 
 **If Playwright was NOT detected:**
 
-> Your free premium searches for this month are used up. Here's what we can do:
+> Your free premium searches for this month are used up. I can show you a direct link to the registrar page so you can check the price yourself.
 >
-> 1. **Set up a free Fastly API key** — unlimited premium checks, I can walk you through it
-> 2. **Check manually** — I'll open the registrar page in your browser
->
-> Which would you prefer?
->
-> (Tip: If you install [Playwright](https://playwright.dev/), you can use it to check registrar pricing pages directly.)
+> (Tip: If you install [Playwright](https://playwright.dev/), I can check registrar pricing pages directly next time.)
 
-**After the user chooses (Playwright detected — 3-option menu):**
+**After the user chooses (Playwright detected):**
 
-- **Option 1 (registrar check):** Run Step 10 (Browser-Based Price Check) for the domain.
-- **Option 2 (API key):** Run Step 9 (Config File Management) — walk them through token setup.
-- **Option 3 (manual):** Run `open "{registrar search URL for domain}"` using the routing table from Step 3e.
+- **Option 1 (registrar check):** Run Step 9 (Browser-Based Price Check) for the domain.
+- **Option 2 (manual):** Show the registrar URL using the routing table from Step 3e. Ask if they'd like you to open it.
 
-**After the user chooses (no Playwright — 2-option menu):**
+**After the user chooses (no Playwright):**
 
-- **Option 1 (API key):** Run Step 9 (Config File Management) — walk them through token setup.
-- **Option 2 (manual):** Run `open "{registrar search URL for domain}"` using the routing table from Step 3e.
+- Show the registrar URL using the routing table from Step 3e. Ask if they'd like you to open it.
 
-**Session memory:** Remember the user's choice for the rest of this conversation. If they hit the quota again on a different domain in the same session, automatically use their previous choice without re-asking. If they chose the Playwright path and already gave consent (see Step 10), run it directly for subsequent domains. If they chose the manual option, silently open the link each time.
+**Session memory:** Remember the user's choice for the rest of this conversation. If they hit the quota again on a different domain in the same session, automatically use their previous choice without re-asking. If they chose the Playwright path and already gave consent (see Step 9), run it directly for subsequent domains.
 
 ---
 
@@ -1050,111 +1018,17 @@ Do not offer it. No mention needed. Proceed as if premium search does not exist.
 **User explicitly asks for premium search when unavailable:**
 > "Premium search is temporarily unavailable. You can check if this domain is listed for sale directly on [Sedo →](https://sedo.com/search/?keyword={domain}), or I can help you find available alternatives."
 
-**User has their own API key and it returns an error:**
-> "Your Fastly API token returned an error — it may have expired or been revoked. Check your Fastly dashboard."
-
-**Browser-based price check fails (Step 10):**
+**Browser-based price check fails (Step 9):**
 > "I wasn't able to pull the pricing from the registrar page. Here's a direct link so you can check it yourself:
 > [{registrar name} →]({registrar search URL for domain})"
 
-Ask the user if they'd like you to open the link. Do not auto-open. Do not retry the Playwright scrape — one attempt is enough. If repeated Step 10 failures occur in the same session, skip future Playwright attempts and default to offering the manual link.
+Ask the user if they'd like you to open the link. Do not auto-open. Do not retry the Playwright scrape — one attempt is enough. If repeated Step 9 failures occur in the same session, skip future Playwright attempts and default to offering the manual link.
 
 Never pretend a feature doesn't exist after the user has seen it in use during the current session.
 
 ---
 
-## Step 9: Config File Management
-
-Users can supply their own Fastly API token to get unlimited premium searches instead of the 5-check proxy quota.
-
----
-
-### Storage Location and Format
-
-**Config file:** `~/.claude/domain-puppy/config.json`
-
-```json
-{
-  "fastlyApiToken": "user-token-here"
-}
-```
-
-**File permissions:**
-- Directory: `chmod 700 ~/.claude/domain-puppy`
-- Config file: `chmod 600 ~/.claude/domain-puppy/config.json`
-
----
-
-### API Key Setup Flow
-
-**IMPORTANT: The token must NEVER pass through the chat.** Do not ask the user to paste their token into the conversation. The user creates the config file themselves in their own terminal.
-
-When the user says they want to add their Fastly API token (e.g., "I want to use my own API key" or "domain-puppy config"):
-
-1. **Explain where to get it and how to save it:**
-
-   > Create a free Fastly API token at https://manage.fastly.com/account/personal/tokens — select the 'global:read' scope.
-   >
-   > Then run this in your terminal (replace `YOUR_TOKEN` with the actual token):
-   >
-   > ```
-   > mkdir -p ~/.claude/domain-puppy && chmod 700 ~/.claude/domain-puppy
-   > echo '{"fastlyApiToken":"YOUR_TOKEN"}' > ~/.claude/domain-puppy/config.json
-   > chmod 600 ~/.claude/domain-puppy/config.json
-   > ```
-   >
-   > Let me know when you're done and I'll verify it works.
-
-   **If the user pastes a token into the chat anyway**, do NOT store it. Respond:
-   > For security, I can't handle API tokens directly. Please run the terminal command above to save it to the config file — that way the token stays on your machine and never passes through the chat.
-
-2. **When the user confirms the file is created, verify with a test call:**
-
-   ```bash
-   FASTLY_TOKEN=$(grep -oE '"fastlyApiToken"[[:space:]]*:[[:space:]]*"[^"]*"' "$HOME/.claude/domain-puppy/config.json" 2>/dev/null | cut -d'"' -f4)
-
-   if [ -z "$FASTLY_TOKEN" ]; then
-     echo "no_config"
-   else
-     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
-       --config <(printf 'header = "Fastly-Key: %s"\n' "$FASTLY_TOKEN") \
-       "https://api.domainr.com/v2/status?domain=example.com")
-     echo "status=$HTTP_CODE"
-   fi
-   ```
-
-   - If `status=200`:
-     > "Token verified — premium search is now active with unlimited checks."
-   - If `status=401` or `status=403`:
-     > "The token doesn't seem to work. Please double-check it on your Fastly dashboard."
-   - If `no_config`:
-     > "I don't see a config file yet. Make sure you ran the command above in your terminal."
-   - Do NOT display the raw API response or the token value.
-
----
-
-### Reading the Key at Call Time
-
-At the start of any premium check, read the config file to determine whether to use the proxy or the user's key:
-
-```bash
-FASTLY_TOKEN=""
-if [ -f ~/.claude/domain-puppy/config.json ]; then
-  FASTLY_TOKEN=$(grep -oE '"fastlyApiToken"[[:space:]]*:[[:space:]]*"[^"]*"' "$HOME/.claude/domain-puppy/config.json" 2>/dev/null | cut -d'"' -f4)
-fi
-
-if [ -n "$FASTLY_TOKEN" ]; then
-  # Use direct Fastly API call (user's own token)
-else
-  # Use proxy call (IP-based quota)
-fi
-```
-
-Use `grep` + `cut` for JSON parsing — do not assume `jq` or `python3` is installed.
-
----
-
-## Step 10: Browser-Based Price Check (Playwright Fallback)
+## Step 9: Browser-Based Price Check (Playwright Fallback)
 
 This step is triggered from the Quota Exceeded Handler in Step 8 when the user chooses the Playwright option and Playwright was confirmed available.
 
