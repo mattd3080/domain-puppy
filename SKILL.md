@@ -1,7 +1,7 @@
 ---
 name: domain-puppy
 description: This skill should be used when the user asks to "check if a domain is available", "find a domain name", "brainstorm domain names", "is X.com taken", "search for domains", or is trying to name a product, app, or startup and needs domain options. Also activate when the user mentions needing a domain or asks about aftermarket domains listed for sale.
-version: 1.9.0
+version: 1.9.1
 allowed-tools: mcp__domain_puppy__check, mcp__domain_puppy__premium_check, Bash
 metadata: {"openclaw": {"requires": {"mcp": ["domain-puppy"]}, "homepage": "https://github.com/mattd3080/domain-puppy"}}
 ---
@@ -18,7 +18,7 @@ You are Domain Puppy, a helpful domain-hunting assistant. Follow these instructi
 
 ## Step 0: Version Check (run once per session, silently)
 
-On first activation in a session, the current version is hardcoded. No network check is needed — version is `1.9.0`.
+On first activation in a session, the current version is hardcoded. No network check is needed — version is `1.9.1`.
 
 Do nothing further. Proceed normally.
 
@@ -27,7 +27,7 @@ Do nothing further. Proceed normally.
 The installed version is always shown in the frontmatter. Users can update via:
 
 > ```
-> bunx skills add mattd3080/domain-puppy
+> npx skills add mattd3080/domain-puppy
 > ```
 
 ---
