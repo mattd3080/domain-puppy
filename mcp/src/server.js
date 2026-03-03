@@ -9,11 +9,12 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
 import { handleCheck, handlePremiumCheck } from "./handlers.js";
 
 const server = new McpServer({
   name: "domain-puppy",
-  version: "1.9.0",
+  version: "2.2.0",
 });
 
 // ---------------------------------------------------------------------------
@@ -24,12 +25,7 @@ server.tool(
   "check",
   "Check domain availability for up to 20 domains",
   {
-    domains: {
-      type: "array",
-      items: { type: "string" },
-      minItems: 1,
-      maxItems: 20,
-    },
+    domains: z.array(z.string()).min(1).max(20),
   },
   async (args) => handleCheck(args)
 );
@@ -42,10 +38,7 @@ server.tool(
   "premium_check",
   "Check aftermarket/premium status for a single domain (quota-limited)",
   {
-    domain: {
-      type: "string",
-      minLength: 1,
-    },
+    domain: z.string().min(1),
   },
   async (args) => handlePremiumCheck(args)
 );
