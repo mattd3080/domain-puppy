@@ -1,11 +1,11 @@
 import { connect } from 'cloudflare:sockets';
 
 /**
- * Domain Puppy — Cloudflare Worker Proxy
- * Premium domain lookup via Fastly Domain Research API (Domainr)
+ * Domain Puppy — Cloudflare Worker Proxy (v2.2.0)
+ * Premium domain lookup via Sedo Partner API + Fastly Domain Research API (Domainr)
  *
  * Privacy: domain names are never logged. Only aggregate metrics are tracked.
- * Security: FASTLY_API_TOKEN lives in Cloudflare secrets, never in responses.
+ * Security: All API credentials live in Cloudflare secrets, never in responses or logs.
  */
 
 const RESPONSE_HEADERS = {
@@ -97,6 +97,102 @@ function parseDomainrResponse(data, requestedDomain) {
 }
 
 // ---------------------------------------------------------------------------
+// Sedo DomainStatus API (aftermarket listings with prices)
+// ---------------------------------------------------------------------------
+
+/** Sedo currency code mapping. Sedo returns integers OR strings depending on listing status. */
+const SEDO_CURRENCY_MAP = { '0': 'EUR', '1': 'USD', '2': 'GBP' };
+
+/**
+ * Parses Sedo DomainStatus XML response using regex only.
+ * No DOMParser / no XML library — eliminates XXE/entity expansion attack surfaces.
+ *
+ * Returns the matching item object or null on any error.
+ */
+function parseSedoXml(responseText, requestedDomain) {
+  if (!responseText || typeof responseText !== 'string') return null;
+
+  // Reject oversized responses (single-domain responses are ~500 bytes; fuzzy matches ~2.5KB)
+  if (responseText.length > 10240) return null;
+
+  // Check for SEDOFAULT error envelope
+  if (/<SEDOFAULT>/i.test(responseText) || /<faultcode>/i.test(responseText)) return null;
+
+  // Extract all <item> blocks
+  const itemRegex = /<item[^>]*>([\s\S]*?)<\/item>/gi;
+  const normalizedDomain = requestedDomain.toLowerCase();
+  let match;
+
+  while ((match = itemRegex.exec(responseText)) !== null) {
+    const itemXml = match[1];
+
+    // Extract domain field
+    const domainMatch = itemXml.match(/<domain[^>]*>(.*?)<\/domain>/i);
+    if (!domainMatch) continue;
+
+    // Only process the exact domain match (API returns fuzzy/wildcard matches too)
+    if (domainMatch[1].toLowerCase() !== normalizedDomain) continue;
+
+    // Extract required fields
+    const forsaleMatch = itemXml.match(/<forsale[^>]*>(.*?)<\/forsale>/i);
+    const priceMatch = itemXml.match(/<price[^>]*>(.*?)<\/price>/i);
+    const currencyMatch = itemXml.match(/<currency[^>]*>(.*?)<\/currency>/i);
+    const statusMatch = itemXml.match(/<domainstatus[^>]*>(.*?)<\/domainstatus>/i);
+
+    if (!forsaleMatch || !priceMatch || !statusMatch) return null;
+
+    const forsale = forsaleMatch[1].toLowerCase() === 'true';
+    const price = parseFloat(priceMatch[1]) || 0;
+    const rawCurrency = (currencyMatch?.[1] || '').trim();
+    // Currency can be integer code (0/1/2) or string ("USD"/"EUR"/"GBP")
+    const currency = SEDO_CURRENCY_MAP[rawCurrency] || (rawCurrency.length === 3 ? rawCurrency : 'USD');
+    const domainStatus = parseInt(statusMatch[1], 10) || 0;
+
+    return {
+      forsale,
+      price: Math.max(0, price), // Negative price treated as 0
+      currency,
+      domainStatus,
+    };
+  }
+
+  // No exact match found in response
+  return null;
+}
+
+/**
+ * Calls the Sedo DomainStatus API for a single domain.
+ *
+ * Returns parsed result or null on any failure.
+ * Security: NEVER includes the request URL in errors (URL contains signkey).
+ */
+async function callSedoDomainStatus(domain, env) {
+  const params = new URLSearchParams();
+  params.set('partnerid', env.SEDO_PARTNER_ID);
+  params.set('signkey', env.SEDO_SIGN_KEY);
+  params.set('output_method', 'xml');
+  params.append('domainlist[]', domain);
+
+  const url = `https://api.sedo.com/api/v1/DomainStatus?${params.toString()}`;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (!response.ok) return null;
+
+    const text = await response.text();
+    return parseSedoXml(text, domain);
+  } catch {
+    // Generic error — never expose URL (contains signkey)
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Response helpers
 // ---------------------------------------------------------------------------
 
@@ -149,6 +245,11 @@ function getClientIP(request) {
  *
  * Returns { allowed: bool, checksUsed: number, remaining: number }.
  * Fails open if KV is unavailable (allows the request through).
+ *
+ * Known limitation: read-then-write is not atomic (Cloudflare KV has no CAS).
+ * Concurrent requests from the same IP can both pass the check before either
+ * writes, allowing ~2-5x overuse on a burst. Acceptable for a free-tier quota
+ * system — migrate to Durable Objects if stricter enforcement is needed.
  */
 async function checkQuota(env, clientIP, freeChecksPerIP) {
   if (!env.QUOTA_KV) {
@@ -279,6 +380,8 @@ async function sendBreakerAlert(env, month, count, limit) {
  *
  * Returns { limited: bool }.
  * Fails open if KV is unavailable.
+ *
+ * Same TOCTOU caveat as checkQuota — see note above.
  */
 async function checkRateLimit(env, clientIP, maxPerMinute = 10) {
   if (!env.QUOTA_KV) return { limited: false };
@@ -637,18 +740,19 @@ async function handleDomainCheck(request, env, ctx) {
     return errorResponse(400, 'bad_request', 'Content-Type must be application/json');
   }
 
-  // Reject oversized payloads (8KB — larger than other endpoints due to array input)
-  const contentLength = parseInt(request.headers.get('Content-Length') || '0', 10);
-  if (contentLength > 8192) {
-    return errorResponse(413, 'payload_too_large', 'Request body too large');
-  }
-
-  // Parse body
+  // Parse body — enforce actual size (not Content-Length header, which is client-controlled)
   let body;
   try {
-    body = await request.json();
-  } catch {
-    return errorResponse(400, 'bad_request', 'Request body is not valid JSON');
+    const text = await request.text();
+    if (text.length > 8192) {
+      return errorResponse(413, 'payload_too_large', 'Request body too large');
+    }
+    body = JSON.parse(text);
+  } catch (e) {
+    if (e instanceof SyntaxError) {
+      return errorResponse(400, 'bad_request', 'Request body is not valid JSON');
+    }
+    throw e;
   }
 
   // Validate domains field
@@ -665,10 +769,13 @@ async function handleDomainCheck(request, env, ctx) {
     return errorResponse(400, 'bad_request', 'Field "domains" exceeds the maximum of 20 domains per request');
   }
 
-  // Validate each element
+  // Validate each element (type + length cap before any string operations)
   for (const item of body.domains) {
     if (typeof item !== 'string') {
       return errorResponse(400, 'bad_request', 'Each element in "domains" must be a string');
+    }
+    if (item.length > 253) {
+      return errorResponse(400, 'bad_request', 'Domain name exceeds maximum length (253 characters)');
     }
   }
 
@@ -679,7 +786,7 @@ async function handleDomainCheck(request, env, ctx) {
   // Validate domain formats
   for (const domain of unique) {
     if (!isValidDomain(domain)) {
-      return errorResponse(400, 'bad_request', `Invalid domain format: ${domain}`);
+      return errorResponse(400, 'bad_request', `Invalid domain format: ${domain.slice(0, 64)}`);
     }
   }
 
@@ -901,24 +1008,25 @@ async function handleWhoisCheck(request, env) {
     return errorResponse(429, 'rate_limited', 'Too many requests. Please wait a moment.');
   }
 
-  // Request body size limit
-  const contentLength = parseInt(request.headers.get('Content-Length') || '0', 10);
-  if (contentLength > 4096) {
-    return errorResponse(413, 'payload_too_large', 'Request body too large');
-  }
-
   // Enforce Content-Type
   const contentType = request.headers.get('Content-Type') || '';
   if (!contentType.includes('application/json')) {
     return errorResponse(400, 'bad_request', 'Content-Type must be application/json');
   }
 
-  // Parse body
+  // Parse body — enforce actual size (not Content-Length header, which is client-controlled)
   let body;
   try {
-    body = await request.json();
-  } catch {
-    return errorResponse(400, 'bad_request', 'Request body is not valid JSON');
+    const text = await request.text();
+    if (text.length > 4096) {
+      return errorResponse(413, 'payload_too_large', 'Request body too large');
+    }
+    body = JSON.parse(text);
+  } catch (e) {
+    if (e instanceof SyntaxError) {
+      return errorResponse(400, 'bad_request', 'Request body is not valid JSON');
+    }
+    throw e;
   }
 
   const { domain } = body;
@@ -969,10 +1077,16 @@ async function handlePremiumCheck(request, env) {
     return errorResponse(429, 'rate_limited', 'Too many requests. Please wait a moment.');
   }
 
-  // --- Global circuit breaker check ---
+  // --- Global circuit breaker check (protects Fastly quota only) ---
   const { open } = await checkCircuitBreaker(env, monthlyQuotaLimit);
   if (open) {
-    return errorResponse(503, 'service_unavailable');
+    // Circuit breaker is open, but Sedo might still work. If Sedo is configured,
+    // we can still try it. If Sedo resolves, we skip Fastly entirely.
+    // If Sedo doesn't resolve, we're stuck since Fastly is unavailable.
+    // For simplicity: if breaker is open AND Sedo is not configured, reject.
+    if (!env.SEDO_PARTNER_ID || !env.SEDO_SIGN_KEY) {
+      return errorResponse(503, 'service_unavailable');
+    }
   }
 
   // --- IP quota check ---
@@ -981,24 +1095,25 @@ async function handlePremiumCheck(request, env) {
     return jsonResponse({ error: 'quota_exceeded', remainingChecks: 0 }, 429);
   }
 
-  // Request body size limit
-  const contentLength = parseInt(request.headers.get('Content-Length') || '0', 10);
-  if (contentLength > 4096) {
-    return errorResponse(413, 'payload_too_large', 'Request body too large');
-  }
-
   // Enforce Content-Type
   const contentType = request.headers.get('Content-Type') || '';
   if (!contentType.includes('application/json')) {
     return errorResponse(400, 'bad_request', 'Content-Type must be application/json');
   }
 
-  // Parse body
+  // Parse body — enforce actual size (not Content-Length header, which is client-controlled)
   let body;
   try {
-    body = await request.json();
-  } catch {
-    return errorResponse(400, 'bad_request', 'Request body is not valid JSON');
+    const text = await request.text();
+    if (text.length > 4096) {
+      return errorResponse(413, 'payload_too_large', 'Request body too large');
+    }
+    body = JSON.parse(text);
+  } catch (e) {
+    if (e instanceof SyntaxError) {
+      return errorResponse(400, 'bad_request', 'Request body is not valid JSON');
+    }
+    throw e;
   }
 
   const { domain } = body;
@@ -1014,12 +1129,49 @@ async function handlePremiumCheck(request, env) {
     return errorResponse(400, 'bad_request', 'Invalid domain format');
   }
 
-  // Guard: FASTLY_API_TOKEN must be configured
-  if (!env.FASTLY_API_TOKEN) {
-    return errorResponse(503, 'service_unavailable');
+  const remainingChecks = Math.max(0, freeChecksPerIP - (checksUsed + 1));
+
+  // =========================================================================
+  // Waterfall: Sedo first (aftermarket + prices), Fastly fallback (registry premiums)
+  //
+  // Timing note: Sedo-listed domains resolve faster (~500ms). Non-listed domains
+  // fall through to Fastly (~1s), so total time is longer. This timing differential
+  // reveals whether a domain is in Sedo's database, but this info is already public.
+  // =========================================================================
+
+  // --- Step 1: Try Sedo DomainStatus (if configured) ---
+  if (env.SEDO_PARTNER_ID && env.SEDO_SIGN_KEY) {
+    const sedoResult = await callSedoDomainStatus(domain, env);
+
+    if (sedoResult) {
+      if (sedoResult.forsale && sedoResult.price > 0) {
+        // Listed for sale with a price
+        await incrementQuota(env, clientIP, checksUsed);
+        return jsonResponse({ status: 'for_sale', source: 'sedo', price: sedoResult.price, currency: sedoResult.currency, remainingChecks });
+      }
+      if (sedoResult.forsale && sedoResult.price <= 0) {
+        // Listed for sale, make-offer (no fixed price)
+        await incrementQuota(env, clientIP, checksUsed);
+        return jsonResponse({ status: 'for_sale_make_offer', source: 'sedo', remainingChecks });
+      }
+      // forsale=false OR domainstatus=0 → fall through to Fastly
+    }
+    // sedoResult is null (error/timeout) → fall through to Fastly
   }
 
-  // Forward to Fastly Domain Research API (Domainr)
+  // --- Step 2: Fallback to Fastly/Domainr (registry premiums + parked detection) ---
+
+  // Guard: FASTLY_API_TOKEN must be configured for the fallback path
+  if (!env.FASTLY_API_TOKEN) {
+    // Neither Sedo resolved nor Fastly is available
+    return jsonResponse({ status: 'unknown', remainingChecks });
+  }
+
+  // Check circuit breaker again — Fastly calls count against the monthly quota
+  if (open) {
+    return jsonResponse({ status: 'unknown', remainingChecks });
+  }
+
   let domainrResponse;
   try {
     domainrResponse = await fetch(
@@ -1031,8 +1183,9 @@ async function handlePremiumCheck(request, env) {
       }
     );
   } catch {
-    // Network-level failure reaching the upstream API
-    return errorResponse(503, 'service_unavailable');
+    // Network-level failure reaching Fastly
+    await incrementQuota(env, clientIP, checksUsed);
+    return jsonResponse({ status: 'unknown', remainingChecks });
   }
 
   // Handle upstream quota errors
@@ -1042,7 +1195,8 @@ async function handlePremiumCheck(request, env) {
 
   // Handle other upstream errors
   if (!domainrResponse.ok) {
-    return errorResponse(503, 'service_unavailable');
+    await incrementQuota(env, clientIP, checksUsed);
+    return jsonResponse({ status: 'unknown', remainingChecks });
   }
 
   // Parse upstream response
@@ -1050,22 +1204,23 @@ async function handlePremiumCheck(request, env) {
   try {
     domainrData = await domainrResponse.json();
   } catch {
-    return errorResponse(503, 'service_unavailable');
+    await incrementQuota(env, clientIP, checksUsed);
+    return jsonResponse({ status: 'unknown', remainingChecks });
   }
 
   // Map status — domain name is used only for matching, never logged
   const status = parseDomainrResponse(domainrData, domain);
 
-  // API call succeeded — increment both IP quota and global monthly counter
+  // Fastly call succeeded — increment IP quota AND monthly counter
+  // (monthly counter only incremented when Fastly is actually called)
   await Promise.all([
     incrementQuota(env, clientIP, checksUsed),
     incrementMonthlyCount(env, monthlyQuotaLimit),
   ]);
 
-  const remainingChecks = Math.max(0, freeChecksPerIP - (checksUsed + 1));
-
   return jsonResponse({
     status,
+    source: 'fastly',
     remainingChecks,
   });
 }
@@ -1078,9 +1233,12 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // Handle OPTIONS preflight for all routes
+    // Handle OPTIONS preflight for all routes.
+    // No CORS headers — this worker is called server-side by the MCP server,
+    // never from browsers. Omitting Access-Control-Allow-Origin means browsers
+    // block cross-origin calls (same-origin policy), which is the desired behavior.
     if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: {} });
+      return new Response(null, { status: 204 });
     }
 
     try {

@@ -436,3 +436,55 @@ describe("handlePremiumCheck — worker error handling", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// premium_check — Sedo field passthrough
+// ---------------------------------------------------------------------------
+
+describe("handlePremiumCheck — Sedo field passthrough", () => {
+  it("passes through source, price, and currency fields from Sedo response", async () => {
+    const workerPayload = { status: "for_sale", source: "sedo", price: 5000, currency: "USD", remainingChecks: 3 };
+    const restore = mockFetch(async () => fakeResponse(workerPayload));
+    try {
+      const result = await handlePremiumCheck({ domain: "premium.com" });
+      assert.ok(!result.isError, "should not be an error");
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.status, "for_sale");
+      assert.equal(parsed.source, "sedo");
+      assert.equal(parsed.price, 5000);
+      assert.equal(parsed.currency, "USD");
+      assert.equal(parsed.remainingChecks, 3);
+    } finally {
+      restore();
+    }
+  });
+
+  it("passes through for_sale_make_offer status", async () => {
+    const workerPayload = { status: "for_sale_make_offer", source: "sedo", remainingChecks: 2 };
+    const restore = mockFetch(async () => fakeResponse(workerPayload));
+    try {
+      const result = await handlePremiumCheck({ domain: "offer.com" });
+      assert.ok(!result.isError);
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.status, "for_sale_make_offer");
+      assert.equal(parsed.source, "sedo");
+      assert.equal(parsed.remainingChecks, 2);
+    } finally {
+      restore();
+    }
+  });
+
+  it("passes through Fastly source field", async () => {
+    const workerPayload = { status: "premium", source: "fastly", remainingChecks: 4 };
+    const restore = mockFetch(async () => fakeResponse(workerPayload));
+    try {
+      const result = await handlePremiumCheck({ domain: "registry.com" });
+      assert.ok(!result.isError);
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.status, "premium");
+      assert.equal(parsed.source, "fastly");
+    } finally {
+      restore();
+    }
+  });
+});

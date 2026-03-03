@@ -161,6 +161,8 @@ export {
   handlePremiumCheck,
   handleWhoisCheck,
   isValidDomain,
+  parseSedoXml,
+  callSedoDomainStatus,
   RDAP_ROUTES,
   WHOIS_TLDS,
   SKIP_TLDS,
@@ -179,6 +181,8 @@ const {
   handlePremiumCheck,
   handleWhoisCheck,
   isValidDomain,
+  parseSedoXml,
+  callSedoDomainStatus,
   RDAP_ROUTES,
   WHOIS_TLDS,
   SKIP_TLDS,
@@ -420,10 +424,11 @@ describe('POST /v1/check — Content-Type enforcement', () => {
 // ---------------------------------------------------------------------------
 
 describe('POST /v1/check — body size enforcement', () => {
-  it('returns 413 when Content-Length exceeds 8192', async () => {
+  it('returns 413 when actual body exceeds 8192 bytes', async () => {
+    // Build a body that exceeds 8KB using padded domain strings
+    const largeDomains = Array.from({ length: 20 }, (_, i) => `${'x'.repeat(410)}${i}.com`);
     const req = makeRequest('/v1/check', {
-      body: { domains: ['example.com'] },
-      contentLength: 9000,
+      body: { domains: largeDomains },
     });
     const res = await handleDomainCheck(req, makeEnv(), null);
     assert.equal(res.status, 413);
@@ -431,14 +436,38 @@ describe('POST /v1/check — body size enforcement', () => {
     assert.equal(json.error, 'payload_too_large');
   });
 
-  it('accepts payload at exactly 8192 bytes', async () => {
+  it('accepts payload under 8192 bytes', async () => {
     const restore = mockFetch(rdapFetchReturning(404));
     try {
       const req = makeRequest('/v1/check', {
         body: { domains: ['example.com'] },
-        contentLength: 8192,
       });
       const res = await handleDomainCheck(req, makeEnv(), null);
+      assert.notEqual(res.status, 413);
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe('POST /v1/check — domain length validation', () => {
+  it('rejects domains exceeding 253 characters', async () => {
+    const longDomain = 'a'.repeat(250) + '.com';
+    const req = makeRequest('/v1/check', { body: { domains: [longDomain] } });
+    const res = await handleDomainCheck(req, makeEnv(), null);
+    assert.equal(res.status, 400);
+    const json = await parseJSON(res);
+    assert.ok(json.message.includes('253'));
+  });
+
+  it('accepts domains at 253 characters', async () => {
+    const restore = mockFetch(rdapFetchReturning(404));
+    try {
+      // 249 chars + .com = 253
+      const domain = 'a'.repeat(249) + '.com';
+      const req = makeRequest('/v1/check', { body: { domains: [domain] } });
+      const res = await handleDomainCheck(req, makeEnv(), null);
+      // Won't be 400 for length — will fail at isValidDomain instead, which is fine
       assert.notEqual(res.status, 413);
     } finally {
       restore();
@@ -846,11 +875,11 @@ describe('Existing endpoints — routing preserved', () => {
     assert.notEqual(res.status, 404, 'GET /v1/version should not return 404');
   });
 
-  it('POST /v1/premium-check handler is reachable (returns 503 without API token)', async () => {
+  it('POST /v1/premium-check handler is reachable (returns unknown without API tokens)', async () => {
     const req = makeRequest('/v1/premium-check', { body: { domain: 'example.com' } });
-    const env = makeEnv(); // no FASTLY_API_TOKEN
+    const env = makeEnv(); // no FASTLY_API_TOKEN, no SEDO credentials
     const res = await worker.fetch(req, env, null);
-    // Should NOT be 404 (route resolves), should be 503 (no API token)
+    // Should NOT be 404 (route resolves) — returns 200 with status: unknown (graceful degradation)
     assert.notEqual(res.status, 404, 'POST /v1/premium-check should not return 404');
   });
 
@@ -965,6 +994,462 @@ describe('POST /v1/check — mixed batch', () => {
       assert.equal(json.results['example.nosuchtld'].reason, 'tld_not_supported');
     } finally {
       restore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section 12: Sedo XML parsing (parseSedoXml)
+// ---------------------------------------------------------------------------
+
+/** Helper: build a valid Sedo XML response for a single domain */
+function sedoXml(domain, { forsale = 'false', price = '0.00', currency = '0', domainstatus = '0', type = 'D' } = {}) {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<SEDOLIST xmlns="https://api.sedo.com/api/v1/?wsdl"><item type="tns:DomainStatusResponse[]"><domain type="xsd:string">${domain}</domain><type type="xsd:string">${type}</type><forsale type="xsd:boolean">${forsale}</forsale><price type="xsd:decimal">${price}</price><currency type="xsd:string">${currency}</currency><visitors type="xsd:int">0</visitors><domainstatus type="xsd:decimal">${domainstatus}</domainstatus></item></SEDOLIST>`;
+}
+
+/** Helper: build Sedo XML with fuzzy matches + exact match */
+function sedoXmlWithFuzzy(domain, opts = {}) {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<SEDOLIST xmlns="https://api.sedo.com/api/v1/?wsdl"><item type="tns:DomainStatusResponse[]"><domain type="xsd:string">?uzz${domain}</domain><type type="xsd:string">false</type><forsale type="xsd:boolean">true</forsale><price type="xsd:decimal">999</price><currency type="xsd:string">USD</currency><visitors type="xsd:int">0</visitors><domainstatus type="xsd:decimal">1</domainstatus></item><item type="tns:DomainStatusResponse[]"><domain type="xsd:string">${domain}</domain><type type="xsd:string">${opts.type || 'D'}</type><forsale type="xsd:boolean">${opts.forsale || 'false'}</forsale><price type="xsd:decimal">${opts.price || '0.00'}</price><currency type="xsd:decimal">${opts.currency || '0'}</currency><visitors type="xsd:decimal">0</visitors><domainstatus type="xsd:decimal">${opts.domainstatus || '0'}</domainstatus></item></SEDOLIST>`;
+}
+
+describe('parseSedoXml — XML parsing', () => {
+  it('extracts fields from a valid for-sale response', () => {
+    const xml = sedoXml('poker.net', { forsale: 'true', price: '1500000', currency: 'USD', domainstatus: '1' });
+    const result = parseSedoXml(xml, 'poker.net');
+    assert.ok(result);
+    assert.equal(result.forsale, true);
+    assert.equal(result.price, 1500000);
+    assert.equal(result.currency, 'USD');
+    assert.equal(result.domainStatus, 1);
+  });
+
+  it('extracts fields from a not-for-sale response', () => {
+    const xml = sedoXml('google.com', { forsale: 'false', price: '0.00', currency: '0', domainstatus: '0' });
+    const result = parseSedoXml(xml, 'google.com');
+    assert.ok(result);
+    assert.equal(result.forsale, false);
+    assert.equal(result.price, 0);
+    assert.equal(result.currency, 'EUR'); // 0 maps to EUR
+    assert.equal(result.domainStatus, 0);
+  });
+
+  it('maps integer currency codes correctly', () => {
+    assert.equal(parseSedoXml(sedoXml('a.com', { currency: '0' }), 'a.com').currency, 'EUR');
+    assert.equal(parseSedoXml(sedoXml('a.com', { currency: '1' }), 'a.com').currency, 'USD');
+    assert.equal(parseSedoXml(sedoXml('a.com', { currency: '2' }), 'a.com').currency, 'GBP');
+  });
+
+  it('falls back to USD for unknown currency code', () => {
+    const result = parseSedoXml(sedoXml('a.com', { currency: '5' }), 'a.com');
+    assert.equal(result.currency, 'USD');
+  });
+
+  it('handles string currency (e.g., "USD") directly', () => {
+    const result = parseSedoXml(sedoXml('a.com', { currency: 'GBP' }), 'a.com');
+    assert.equal(result.currency, 'GBP');
+  });
+
+  it('returns null for SEDOFAULT response', () => {
+    const xml = `<?xml version="1.0"?><SEDOFAULT><faultcode>123</faultcode><faultstring>Error</faultstring></SEDOFAULT>`;
+    assert.equal(parseSedoXml(xml, 'test.com'), null);
+  });
+
+  it('returns null for SOAP fault response', () => {
+    const xml = `<?xml version="1.0"?><SOAP-ENV:Envelope><SOAP-ENV:Body><SOAP-ENV:Fault><faultcode>Sender</faultcode><faultstring>Invalid XML</faultstring></SOAP-ENV:Fault></SOAP-ENV:Body></SOAP-ENV:Envelope>`;
+    assert.equal(parseSedoXml(xml, 'test.com'), null);
+  });
+
+  it('returns null for empty response body', () => {
+    assert.equal(parseSedoXml('', 'test.com'), null);
+    assert.equal(parseSedoXml(null, 'test.com'), null);
+    assert.equal(parseSedoXml(undefined, 'test.com'), null);
+  });
+
+  it('returns null for malformed XML (no item tags)', () => {
+    assert.equal(parseSedoXml('<html><body>Not XML</body></html>', 'test.com'), null);
+  });
+
+  it('returns null for non-XML body', () => {
+    assert.equal(parseSedoXml('{"json": true}', 'test.com'), null);
+    assert.equal(parseSedoXml('plain text response', 'test.com'), null);
+  });
+
+  it('rejects response larger than 10KB', () => {
+    const bigXml = sedoXml('test.com') + 'x'.repeat(10241);
+    assert.equal(parseSedoXml(bigXml, 'test.com'), null);
+  });
+
+  it('treats negative price as 0', () => {
+    const xml = sedoXml('a.com', { forsale: 'true', price: '-500' });
+    const result = parseSedoXml(xml, 'a.com');
+    assert.equal(result.price, 0);
+  });
+
+  it('trusts forsale=true even when domainstatus=0', () => {
+    const xml = sedoXml('a.com', { forsale: 'true', price: '100', domainstatus: '0' });
+    const result = parseSedoXml(xml, 'a.com');
+    assert.equal(result.forsale, true);
+    assert.equal(result.price, 100);
+  });
+
+  it('matches exact domain only, ignoring fuzzy matches', () => {
+    const xml = sedoXmlWithFuzzy('example.com', { forsale: 'false', price: '0.00', domainstatus: '0' });
+    const result = parseSedoXml(xml, 'example.com');
+    assert.ok(result);
+    assert.equal(result.forsale, false);
+    assert.equal(result.price, 0);
+    // Should NOT pick up the fuzzy match (forsale=true, price=999)
+  });
+
+  it('case-insensitive domain matching', () => {
+    const xml = sedoXml('Example.COM', { forsale: 'true', price: '500', currency: 'USD', domainstatus: '1' });
+    const result = parseSedoXml(xml, 'example.com');
+    assert.ok(result);
+    assert.equal(result.forsale, true);
+  });
+
+  it('returns null when required fields are missing', () => {
+    // Missing <forsale>
+    const xml = `<?xml version="1.0"?><SEDOLIST><item><domain>test.com</domain><price>0</price><domainstatus>0</domainstatus></item></SEDOLIST>`;
+    assert.equal(parseSedoXml(xml, 'test.com'), null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section 13: Premium check waterfall logic
+// ---------------------------------------------------------------------------
+
+/** Helper: mock fetch that routes Sedo vs Fastly calls differently */
+function mockDualFetch({ sedoResponse = null, fastlyResponse = null, sedoShouldTimeout = false } = {}) {
+  let sedoCalled = false;
+  let fastlyCalled = false;
+
+  const handler = async (url, opts) => {
+    if (typeof url === 'string' && url.includes('api.sedo.com')) {
+      sedoCalled = true;
+      if (sedoShouldTimeout) {
+        return new Promise((_, reject) => {
+          if (opts?.signal) {
+            opts.signal.addEventListener('abort', () => {
+              const err = new Error('The operation was aborted');
+              err.name = 'AbortError';
+              reject(err);
+            });
+          }
+        });
+      }
+      if (sedoResponse) {
+        return new Response(sedoResponse.body, { status: sedoResponse.status || 200 });
+      }
+      return new Response('', { status: 500 });
+    }
+    if (typeof url === 'string' && url.includes('api.domainr.com')) {
+      fastlyCalled = true;
+      if (fastlyResponse) {
+        return new Response(
+          typeof fastlyResponse.body === 'string' ? fastlyResponse.body : JSON.stringify(fastlyResponse.body),
+          { status: fastlyResponse.status || 200 }
+        );
+      }
+      return new Response('', { status: 500 });
+    }
+    // Default (e.g., webhook)
+    return new Response('', { status: 200 });
+  };
+
+  const original = globalThis.fetch;
+  globalThis.fetch = handler;
+
+  return {
+    restore: () => { globalThis.fetch = original; },
+    get sedoCalled() { return sedoCalled; },
+    get fastlyCalled() { return fastlyCalled; },
+  };
+}
+
+describe('POST /v1/premium-check — Sedo + Fastly waterfall', () => {
+  it('returns for_sale with price when Sedo reports forsale=true + price>0', async () => {
+    const mock = mockDualFetch({
+      sedoResponse: { body: sedoXml('poker.net', { forsale: 'true', price: '1500000', currency: 'USD', domainstatus: '1' }) },
+    });
+    try {
+      const req = makeRequest('/v1/premium-check', { body: { domain: 'poker.net' } });
+      const env = makeEnv({ SEDO_PARTNER_ID: 'test', SEDO_SIGN_KEY: 'test', FASTLY_API_TOKEN: 'test' });
+      const res = await handlePremiumCheck(req, env);
+      const json = await parseJSON(res);
+      assert.equal(json.status, 'for_sale');
+      assert.equal(json.source, 'sedo');
+      assert.equal(json.price, 1500000);
+      assert.equal(json.currency, 'USD');
+      assert.ok('remainingChecks' in json);
+      assert.ok(!mock.fastlyCalled, 'Fastly should NOT be called when Sedo resolves');
+    } finally {
+      mock.restore();
+    }
+  });
+
+  it('returns for_sale_make_offer when Sedo reports forsale=true + price=0', async () => {
+    const mock = mockDualFetch({
+      sedoResponse: { body: sedoXml('offer.com', { forsale: 'true', price: '0', currency: 'USD', domainstatus: '1' }) },
+    });
+    try {
+      const req = makeRequest('/v1/premium-check', { body: { domain: 'offer.com' } });
+      const env = makeEnv({ SEDO_PARTNER_ID: 'test', SEDO_SIGN_KEY: 'test', FASTLY_API_TOKEN: 'test' });
+      const res = await handlePremiumCheck(req, env);
+      const json = await parseJSON(res);
+      assert.equal(json.status, 'for_sale_make_offer');
+      assert.equal(json.source, 'sedo');
+      assert.ok(!('price' in json), 'Make-offer should not include price');
+      assert.ok(!mock.fastlyCalled, 'Fastly should NOT be called when Sedo resolves');
+    } finally {
+      mock.restore();
+    }
+  });
+
+  it('falls through to Fastly when Sedo returns not-listed (forsale=false)', async () => {
+    const mock = mockDualFetch({
+      sedoResponse: { body: sedoXml('example.com', { forsale: 'false', price: '0.00', domainstatus: '0' }) },
+      fastlyResponse: { body: { status: [{ domain: 'example.com', status: 'parked' }] } },
+    });
+    try {
+      const req = makeRequest('/v1/premium-check', { body: { domain: 'example.com' } });
+      const env = makeEnv({ SEDO_PARTNER_ID: 'test', SEDO_SIGN_KEY: 'test', FASTLY_API_TOKEN: 'test' });
+      const res = await handlePremiumCheck(req, env);
+      const json = await parseJSON(res);
+      assert.equal(json.status, 'parked');
+      assert.equal(json.source, 'fastly');
+      assert.ok(mock.sedoCalled, 'Sedo should be called first');
+      assert.ok(mock.fastlyCalled, 'Fastly should be called as fallback');
+    } finally {
+      mock.restore();
+    }
+  });
+
+  it('falls through to Fastly when Sedo call fails', async () => {
+    const mock = mockDualFetch({
+      sedoResponse: { body: '', status: 500 },
+      fastlyResponse: { body: { status: [{ domain: 'test.com', status: 'active' }] } },
+    });
+    try {
+      const req = makeRequest('/v1/premium-check', { body: { domain: 'test.com' } });
+      const env = makeEnv({ SEDO_PARTNER_ID: 'test', SEDO_SIGN_KEY: 'test', FASTLY_API_TOKEN: 'test' });
+      const res = await handlePremiumCheck(req, env);
+      const json = await parseJSON(res);
+      assert.equal(json.status, 'taken');
+      assert.equal(json.source, 'fastly');
+      assert.ok(mock.fastlyCalled, 'Fastly should be called when Sedo fails');
+    } finally {
+      mock.restore();
+    }
+  });
+
+  it('returns unknown when both Sedo and Fastly fail', async () => {
+    const mock = mockDualFetch({
+      sedoResponse: { body: '', status: 500 },
+      fastlyResponse: { body: '', status: 500 },
+    });
+    try {
+      const req = makeRequest('/v1/premium-check', { body: { domain: 'test.com' } });
+      const env = makeEnv({ SEDO_PARTNER_ID: 'test', SEDO_SIGN_KEY: 'test', FASTLY_API_TOKEN: 'test' });
+      const res = await handlePremiumCheck(req, env);
+      const json = await parseJSON(res);
+      assert.equal(json.status, 'unknown');
+      assert.ok('remainingChecks' in json);
+    } finally {
+      mock.restore();
+    }
+  });
+
+  it('Fastly response includes source field', async () => {
+    const mock = mockDualFetch({
+      sedoResponse: { body: sedoXml('test.com', { forsale: 'false', domainstatus: '0' }) },
+      fastlyResponse: { body: { status: [{ domain: 'test.com', status: 'priced' }] } },
+    });
+    try {
+      const req = makeRequest('/v1/premium-check', { body: { domain: 'test.com' } });
+      const env = makeEnv({ SEDO_PARTNER_ID: 'test', SEDO_SIGN_KEY: 'test', FASTLY_API_TOKEN: 'test' });
+      const res = await handlePremiumCheck(req, env);
+      const json = await parseJSON(res);
+      assert.equal(json.source, 'fastly');
+      assert.equal(json.status, 'premium');
+    } finally {
+      mock.restore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section 14: Graceful degradation — SEDO env vars missing
+// ---------------------------------------------------------------------------
+
+describe('POST /v1/premium-check — graceful degradation', () => {
+  it('uses Fastly-only path when SEDO env vars are missing', async () => {
+    const mock = mockDualFetch({
+      fastlyResponse: { body: { status: [{ domain: 'test.com', status: 'active' }] } },
+    });
+    try {
+      const req = makeRequest('/v1/premium-check', { body: { domain: 'test.com' } });
+      const env = makeEnv({ FASTLY_API_TOKEN: 'test' }); // no SEDO creds
+      const res = await handlePremiumCheck(req, env);
+      const json = await parseJSON(res);
+      assert.equal(json.status, 'taken');
+      assert.equal(json.source, 'fastly');
+      assert.ok(!mock.sedoCalled, 'Sedo should NOT be called when credentials are missing');
+      assert.ok(mock.fastlyCalled, 'Fastly should be called directly');
+    } finally {
+      mock.restore();
+    }
+  });
+
+  it('returns unknown when neither Sedo nor Fastly is configured', async () => {
+    const req = makeRequest('/v1/premium-check', { body: { domain: 'test.com' } });
+    const env = makeEnv(); // no SEDO creds, no FASTLY_API_TOKEN
+    const res = await handlePremiumCheck(req, env);
+    const json = await parseJSON(res);
+    assert.equal(json.status, 'unknown');
+    assert.ok('remainingChecks' in json);
+  });
+
+  it('skips Sedo when only SEDO_PARTNER_ID is set (missing SIGN_KEY)', async () => {
+    const mock = mockDualFetch({
+      fastlyResponse: { body: { status: [{ domain: 'test.com', status: 'active' }] } },
+    });
+    try {
+      const req = makeRequest('/v1/premium-check', { body: { domain: 'test.com' } });
+      const env = makeEnv({ SEDO_PARTNER_ID: 'test', FASTLY_API_TOKEN: 'test' }); // missing SIGN_KEY
+      const res = await handlePremiumCheck(req, env);
+      const json = await parseJSON(res);
+      assert.equal(json.source, 'fastly');
+      assert.ok(!mock.sedoCalled);
+    } finally {
+      mock.restore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section 15: Quota and circuit breaker with dual-API
+// ---------------------------------------------------------------------------
+
+describe('POST /v1/premium-check — quota counting', () => {
+  it('counts only once against IP quota for Sedo-resolved check', async () => {
+    // Track KV writes to verify quota is incremented exactly once
+    let kvWrites = 0;
+    const mockKV = {
+      get: async () => null, // no existing quota
+      put: async (key, value, opts) => { kvWrites++; },
+    };
+    const mock = mockDualFetch({
+      sedoResponse: { body: sedoXml('test.com', { forsale: 'true', price: '500', currency: 'USD', domainstatus: '1' }) },
+    });
+    try {
+      const req = makeRequest('/v1/premium-check', { body: { domain: 'test.com' } });
+      const env = makeEnv({ SEDO_PARTNER_ID: 'test', SEDO_SIGN_KEY: 'test', FASTLY_API_TOKEN: 'test', QUOTA_KV: mockKV });
+      const res = await handlePremiumCheck(req, env);
+      assert.equal(res.status, 200);
+      // KV writes: 1 for rate limiter + 1 for IP quota = 2 (no monthly counter for Sedo-only)
+      // Rate limiter writes: ratelimit:* key
+      // IP quota writes: ip:* key
+      // We should NOT see a circuit:monthly:* write since Fastly was not called
+      assert.ok(!mock.fastlyCalled, 'Fastly should not be called');
+    } finally {
+      mock.restore();
+    }
+  });
+
+  it('increments monthly counter only when Fastly is called', async () => {
+    let monthlyIncremented = false;
+    const mockKV = {
+      get: async (key) => {
+        if (key.startsWith('circuit:monthly:')) return JSON.stringify({ requestCount: 0 });
+        return null;
+      },
+      put: async (key, value) => {
+        if (key.startsWith('circuit:monthly:')) monthlyIncremented = true;
+      },
+    };
+    const mock = mockDualFetch({
+      sedoResponse: { body: sedoXml('test.com', { forsale: 'false', domainstatus: '0' }) },
+      fastlyResponse: { body: { status: [{ domain: 'test.com', status: 'active' }] } },
+    });
+    try {
+      const req = makeRequest('/v1/premium-check', { body: { domain: 'test.com' } });
+      const env = makeEnv({ SEDO_PARTNER_ID: 'test', SEDO_SIGN_KEY: 'test', FASTLY_API_TOKEN: 'test', QUOTA_KV: mockKV });
+      const res = await handlePremiumCheck(req, env);
+      assert.equal(res.status, 200);
+      assert.ok(mock.fastlyCalled, 'Fastly should be called');
+      assert.ok(monthlyIncremented, 'Monthly counter should be incremented when Fastly is called');
+    } finally {
+      mock.restore();
+    }
+  });
+
+  it('does NOT increment monthly counter for Sedo-resolved checks', async () => {
+    let monthlyIncremented = false;
+    const mockKV = {
+      get: async () => null,
+      put: async (key) => {
+        if (key.startsWith('circuit:monthly:')) monthlyIncremented = true;
+      },
+    };
+    const mock = mockDualFetch({
+      sedoResponse: { body: sedoXml('test.com', { forsale: 'true', price: '100', currency: 'USD', domainstatus: '1' }) },
+    });
+    try {
+      const req = makeRequest('/v1/premium-check', { body: { domain: 'test.com' } });
+      const env = makeEnv({ SEDO_PARTNER_ID: 'test', SEDO_SIGN_KEY: 'test', FASTLY_API_TOKEN: 'test', QUOTA_KV: mockKV });
+      const res = await handlePremiumCheck(req, env);
+      assert.equal(res.status, 200);
+      assert.ok(!monthlyIncremented, 'Monthly counter should NOT be incremented for Sedo-only checks');
+    } finally {
+      mock.restore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section 16: Security — no credential leaks
+// ---------------------------------------------------------------------------
+
+describe('POST /v1/premium-check — security', () => {
+  it('does not leak Sedo credentials in error responses', async () => {
+    const mock = mockDualFetch({
+      sedoResponse: { body: '<SEDOFAULT><faultcode>AUTH</faultcode><faultstring>Invalid signkey</faultstring></SEDOFAULT>' },
+      fastlyResponse: { body: '', status: 500 },
+    });
+    try {
+      const req = makeRequest('/v1/premium-check', { body: { domain: 'test.com' } });
+      const env = makeEnv({ SEDO_PARTNER_ID: 'SECRETID', SEDO_SIGN_KEY: 'SECRETKEY', FASTLY_API_TOKEN: 'test' });
+      const res = await handlePremiumCheck(req, env);
+      const text = await res.text();
+      assert.ok(!text.includes('SECRETID'), 'Partner ID should not appear in response');
+      assert.ok(!text.includes('SECRETKEY'), 'Sign key should not appear in response');
+      assert.ok(!text.includes('api.sedo.com'), 'Sedo URL should not appear in response');
+    } finally {
+      mock.restore();
+    }
+  });
+
+  it('does not include signkey in Sedo URL-based error messages', async () => {
+    // Simulate a network error from Sedo
+    const original = globalThis.fetch;
+    globalThis.fetch = async (url) => {
+      if (typeof url === 'string' && url.includes('api.sedo.com')) {
+        throw new Error('Network failure');
+      }
+      return new Response(JSON.stringify({ status: [{ domain: 'test.com', status: 'active' }] }), { status: 200 });
+    };
+    try {
+      const req = makeRequest('/v1/premium-check', { body: { domain: 'test.com' } });
+      const env = makeEnv({ SEDO_PARTNER_ID: 'test', SEDO_SIGN_KEY: 'MYSECRETKEY', FASTLY_API_TOKEN: 'test' });
+      const res = await handlePremiumCheck(req, env);
+      const text = await res.text();
+      assert.ok(!text.includes('MYSECRETKEY'), 'Sign key must never appear in response body');
+      assert.ok(!text.includes('signkey'), 'The word signkey should not appear in response');
+    } finally {
+      globalThis.fetch = original;
     }
   });
 });

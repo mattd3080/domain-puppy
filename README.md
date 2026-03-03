@@ -11,20 +11,12 @@ Domain Puppy is a Claude Code skill that turns your terminal into a domain resea
 - **Brainstorm with AI** — Generate hundreds of domain name ideas across 7 naming categories using 10 proven techniques
 - **Instant availability checking** — RDAP lookups run in parallel batches, no API key required
 - **Batch check 50–100+ domains in seconds** — parallel checking means no waiting around
-- **Premium aftermarket search** — Find already-registered domains for sale via Fastly Domain Research API (5 free checks/month per user)
-- **Affiliate-powered registration links** — Domains link directly to [name.com](https://www.name.com) for registration and [Sedo](https://sedo.com) for aftermarket purchases
+- **Premium aftermarket search** — Find already-registered domains for sale with real pricing via Sedo + Fastly (5 free checks/month per user)
+- **Affiliate-powered registration links** — Domains link to the appropriate registrar ([name.com](https://www.name.com) or [Dynadot](https://www.dynadot.com) depending on TLD) and [Sedo](https://sedo.com) for aftermarket purchases
 
 ---
 
 ## Installation
-
-**Universal (works everywhere — terminal, Claude Code, Codex, Cursor, Gemini CLI, etc.):**
-
-```bash
-curl -sL domainpuppy.com/install | sh
-```
-
-**Or via the skills CLI:**
 
 ```bash
 npx skills add mattd3080/domain-puppy
@@ -46,13 +38,11 @@ or invoke directly:
 use domain puppy — check brainstorm.com
 ```
 
-Domain Puppy checks availability across a 10-TLD matrix and returns results:
+Domain Puppy checks the domain and returns the result with next steps:
 
 ```
-✅ brainstorm.io       — Available — Register at name.com
-❌ brainstorm.com      — Taken
-✅ brainstorm.ai       — Available — Register at name.com
-❓ brainstorm.co.uk    — Status unknown (ccTLD)
+✅ brainstorm.dev      — Available — Register at name.com
+❌ brainstorm.com      — Taken — check aftermarket, scan other TLDs, or brainstorm alternatives
 ```
 
 ### Flow 2: Brainstorm mode
@@ -63,7 +53,7 @@ Domain Puppy checks availability across a 10-TLD matrix and returns results:
 > A project management tool for remote teams
 ```
 
-Domain Puppy generates waves of names — Quick Wave (fast ideas), Standard Wave (refined variations), Deep Dive (creative combinations) — checking availability for each batch as it goes.
+Domain Puppy generates waves of names — checking availability for each batch as it goes. Say "go deeper" for more waves, or "quick scan" for just the highlights.
 
 ---
 
@@ -71,14 +61,14 @@ Domain Puppy generates waves of names — Quick Wave (fast ideas), Standard Wave
 
 | Feature | Detail |
 |---|---|
-| Single domain check | Checks availability across 10 TLDs per domain |
+| Single domain check | Checks the specific domain you ask about; opt-in TLD scan available |
 | Brainstorm mode | 7 naming categories, 10 techniques, wave-based refinement |
-| Wave-based refinement | Quick / Standard / Deep Dive waves |
-| Taken domain alternatives | 5 strategies when your first choice is gone |
+| Wave-based refinement | Standard depth (2-3 waves), "go deeper" or "quick scan" on demand |
+| Taken domain options | Check the aftermarket, scan other TLDs, or brainstorm alternatives |
 | WHOIS/DNS fallback | Covers ccTLDs that don't support RDAP |
 | Domain hacks | 80+ curated examples across creative TLD combinations |
 | Thematic TLD matching | Suggests TLDs based on 12 project types |
-| Aftermarket search | Premium search via Fastly Domain Research API |
+| Aftermarket search | Premium search via Sedo Partner API + Fastly Domain Research API |
 
 ---
 
@@ -89,8 +79,7 @@ Domain Puppy generates waves of names — Quick Wave (fast ideas), Standard Wave
 Additional details:
 
 - **Availability checks** use MCP tool calls routed through a Cloudflare Worker to RDAP/WHOIS registries — no domain data is stored
-- **Premium search via proxy** — your domain is forwarded to Fastly's Domain Research API and not stored by us
-- **Playwright fallback** — when the premium quota is exhausted, the skill can optionally scrape registrar pricing pages with explicit user consent (one-time opt-in per session)
+- **Premium search via proxy** — your domain is forwarded to the Sedo Partner API and Fastly's Domain Research API and not stored by us
 
 ---
 
@@ -101,15 +90,12 @@ Additional details:
     |
     +-- Availability:  MCP tool call → Cloudflare Worker → RDAP/WHOIS registries
     |
-    +-- Premium:       MCP tool call → Cloudflare Worker → Fastly Domain Research API
-    |
-    +-- Fallback:      Playwright → registrar pricing pages (user opt-in, when API quota exhausted)
+    +-- Premium:       MCP tool call → Cloudflare Worker → Sedo Partner API → Fastly fallback
 ```
 
 1. The skill file runs entirely within Claude Code — no daemon, no background process
 2. Availability checks use MCP tool calls (`mcp__domain_puppy__check`) routed through a local MCP server to the Cloudflare Worker, which queries RDAP/WHOIS registries
-3. Premium aftermarket search uses MCP tool calls (`mcp__domain_puppy__premium_check`) routed through the same Cloudflare Worker to the Fastly Domain Research API
-4. When the free premium quota is exhausted and the user opts in, the skill can use Playwright to scrape registrar pricing pages directly as a fallback
+3. Premium aftermarket search uses MCP tool calls (`mcp__domain_puppy__premium_check`) routed through the same Cloudflare Worker — Sedo is queried first for aftermarket listings and prices, with Fastly Domain Research API as fallback for registry premiums
 
 ---
 
