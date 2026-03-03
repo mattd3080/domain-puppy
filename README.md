@@ -19,10 +19,12 @@ Domain Puppy is a Claude Code skill that turns your terminal into a domain resea
 ## Installation
 
 ```bash
-npx skills add mattd3080/domain-puppy
+npx skills add mattd3080/domain-puppy && claude mcp add domain-puppy -- node ~/.agents/skills/domain-puppy/mcp/src/server.js
 ```
 
 That's it. Start a new conversation and say "find me a domain for [your idea]" — Domain Puppy activates automatically.
+
+> **What this does:** The first command installs the skill. The second registers the MCP server that powers availability checking. You only need to run this once.
 
 ---
 
